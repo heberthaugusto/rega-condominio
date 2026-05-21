@@ -405,8 +405,15 @@ function buildSchedule(fromDate, toDate) {
   // Regra da chuva: chuva no dia X dispensa X e X+1.
   // O próximo responsável rega em X+2 (ou X+3 se X+2 for domingo).
   // O intervalo de 2 dias é sempre contado a partir do ÚLTIMO DIA REGADO.
+  // Regra Karina: se o candidato for segunda-feira logo após um domingo da Karina,
+  // avança para terça-feira para não regar dois dias seguidos.
   let cur = cloneD(START_A);
   let idx = 0;
+
+  // Monta set de domingos da Karina para consulta rápida
+  const karinaSundays = new Set();
+  let ktmp = cloneD(START_K);
+  while (ktmp <= toDate) { karinaSundays.add(toKey(ktmp)); ktmp = addDays(ktmp, 14); }
 
   while (cur <= toDate) {
     // Pula domingo
@@ -422,6 +429,12 @@ function buildSchedule(fromDate, toDate) {
       continue;
     }
 
+    // Regra Karina: se for segunda-feira e o domingo anterior foi da Karina, pula para terça
+    if (cur.getDay() === 1 && karinaSundays.has(prevKey)) {
+      cur = addDays(cur, 1); // avança para terça
+      continue;
+    }
+
     // Registra o responsável
     if (cur >= fromDate) {
       sched[curKey] = sched[curKey] || {};
@@ -433,6 +446,11 @@ function buildSchedule(fromDate, toDate) {
     // Próximo candidato: +2 dias a partir deste dia regado
     let next = addDays(cur, 2);
     if (isSun(next)) next = addDays(next, 1);
+    // Verifica se o próximo também cai em segunda após domingo da Karina
+    const nextPrevKey = toKey(addDays(next, -1));
+    if (next.getDay() === 1 && karinaSundays.has(nextPrevKey)) {
+      next = addDays(next, 1); // avança para terça
+    }
     cur = next;
   }
 
