@@ -142,7 +142,7 @@ jobs:
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Key ${API_KEY}`,
+              'Authorization': `Basic ${API_KEY}`,
               'Content-Length': Buffer.byteLength(payload)
             }
           };
