@@ -798,6 +798,11 @@ function openModal(key, d) {
     html += `<button class="action-btn-outline" style="border:1px solid #fb718544;color:#fb7185" onclick="confirmSkip()">😔 Não consegui regar</button>`;
   }
 
+  // Desfazer "não pôde": só quem registrou pode desfazer
+  if (wasSkipped && wasSkipped.by === currentUser.id && !watered) {
+    html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoSkip()">↩️ Desfazer "não consegui regar"</button>`;
+  }
+
   // Voluntário: qualquer um que não seja o responsável, se foi pulado e não regado
   if (!noWater && respUser && wasSkipped && !watered && !volunteerW && !isMyDay) {
     html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">🙋 Eu reguei no lugar!</button>`;
@@ -847,6 +852,15 @@ async function confirmSkip() {
   showToast('⏭️ Registrado que não pôde regar');
   document.getElementById('modal').style.display = 'none';
   renderCalendar();
+}
+
+async function undoSkip() {
+  delete skipped[modalKey];
+  await save('rega-skipped', skipped);
+  showToast('↩️ Registro desfeito');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
 }
 
 async function confirmVolunteer() {
