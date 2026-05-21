@@ -18,10 +18,21 @@
   <script>
     window.OneSignalDeferred = window.OneSignalDeferred || [];
     OneSignalDeferred.push(async function(OneSignal) {
+      // Registra o SW manualmente antes do init para garantir escopo correto
+      try {
+        await navigator.serviceWorker.register(
+          '/rega-condominio/OneSignalSDKWorker.js',
+          { scope: '/rega-condominio/' }
+        );
+      } catch(e) {
+        console.warn('SW register error:', e);
+      }
+
       await OneSignal.init({
         appId: "0968fd1e-5da0-4a20-bf3f-991dbe8f7b2f",
         safari_web_id: "web.onesignal.auto.69a0d04c-4cfa-4f80-8d34-652264ce8748",
         serviceWorkerPath: "OneSignalSDKWorker.js",
+        serviceWorkerUpdaterPath: "OneSignalSDKWorker.js",
         serviceWorkerParam: { scope: "/rega-condominio/" },
         notifyButton: { enable: false },
         welcomeNotification: { disable: true },
