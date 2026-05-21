@@ -402,37 +402,37 @@ function buildSchedule(fromDate, toDate) {
   }
 
   // Grupo A: dia sim dia não, sem domingos
+  // Regra da chuva: chuva no dia X dispensa X e X+1.
+  // O próximo responsável rega em X+2 (ou X+3 se X+2 for domingo).
+  // O intervalo de 2 dias é sempre contado a partir do ÚLTIMO DIA REGADO.
   let cur = cloneD(START_A);
   let idx = 0;
 
   while (cur <= toDate) {
-    // pula domingo
+    // Pula domingo
     if (isSun(cur)) { cur = addDays(cur, 1); continue; }
 
-    const key = toKey(cur);
+    const curKey  = toKey(cur);
+    const prevKey = toKey(addDays(cur, -1));
+
+    // Se este dia é dia de chuva ou dia seguinte à chuva, não atribui ninguém
+    // e avança 1 dia para tentar o próximo
+    if (rainDays[curKey] || rainDays[prevKey]) {
+      cur = addDays(cur, 1);
+      continue;
+    }
+
+    // Registra o responsável
     if (cur >= fromDate) {
-      sched[key] = sched[key] || {};
-      sched[key].groupA = GROUP_A[idx % GROUP_A.length];
-    }
-
-    // calcula próximo: +2 dias
-    let next = addDays(cur, 2);
-    // se cair no domingo, avança para segunda (+1)
-    if (isSun(next)) next = addDays(next, 1);
-
-    // se houver chuva entre cur e next, recalcula
-    let rainHit = null;
-    for (let ri = 1; ri < 3; ri++) {
-      const rd = addDays(cur, ri);
-      if (rainDays[toKey(rd)]) { rainHit = rd; break; }
-    }
-    if (rainHit) {
-      // dispensa o dia da chuva e o seguinte, retoma no subsequente
-      next = addDays(rainHit, 2);
-      if (isSun(next)) next = addDays(next, 1);
+      sched[curKey] = sched[curKey] || {};
+      sched[curKey].groupA = GROUP_A[idx % GROUP_A.length];
     }
 
     idx++;
+
+    // Próximo candidato: +2 dias a partir deste dia regado
+    let next = addDays(cur, 2);
+    if (isSun(next)) next = addDays(next, 1);
     cur = next;
   }
 
@@ -788,6 +788,11 @@ function openModal(key, d) {
     html += `<button class="action-btn" style="background:#4ade80;color:#0f1a0f" onclick="confirmWatered()">💧 Confirmei que reguei!</button>`;
   }
 
+  // Desfazer rega: só quem registrou pode desfazer
+  if (watered && watered.by === currentUser.id) {
+    html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoWatered()">↩️ Desfazer registro de rega</button>`;
+  }
+
   // Não pôde: só o responsável, só se não regou e não pulou
   if (!noWater && isMyDay && !watered && !wasSkipped) {
     html += `<button class="action-btn-outline" style="border:1px solid #fb718544;color:#fb7185" onclick="confirmSkip()">😔 Não consegui regar</button>`;
@@ -822,6 +827,15 @@ async function confirmWatered() {
   records[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
   await save('rega-records', records);
   showToast('✅ Rega registrada!');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
+}
+
+async function undoWatered() {
+  delete records[modalKey];
+  await save('rega-records', records);
+  showToast('↩️ Registro de rega desfeito');
   document.getElementById('modal').style.display = 'none';
   renderCalendar();
   renderNextDay();
