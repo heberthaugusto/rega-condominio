@@ -22,7 +22,7 @@
         appId: "0968fd1e-5da0-4a20-bf3f-991dbe8f7b2f",
         safari_web_id: "web.onesignal.auto.69a0d04c-4cfa-4f80-8d34-652264ce8748",
         serviceWorkerPath: "OneSignalSDKWorker.js",
-        serviceWorkerParam: { scope: "/" },
+        serviceWorkerParam: { scope: "/rega-condominio/" },
         notifyButton: { enable: false },
         welcomeNotification: { disable: true },
         promptOptions: {
@@ -47,28 +47,9 @@
       });
 
       // Ao se inscrever, salva o player_id associado ao usuário logado
-      OneSignal.on('subscriptionChange', function(isSubscribed) {
-        if (isSubscribed) {
-          OneSignal.getUserId(function(playerId) {
-            if (!playerId) return;
-            localStorage.setItem('onesignal_player_id', playerId);
-            // Associa o player_id ao usuário logado no momento
-            try {
-              const loggedUserId = localStorage.getItem('rega_logged_user');
-              if (loggedUserId) {
-                const players = JSON.parse(localStorage.getItem('rega_players') || '{}');
-                players[loggedUserId] = playerId;
-                localStorage.setItem('rega_players', JSON.stringify(players));
-              }
-            } catch(e) {}
-          });
-        }
-      });
-
-      // Verifica se já está inscrito e atualiza o player_id salvo
-      const isEnabled = await OneSignal.isPushNotificationsEnabled();
-      if (isEnabled) {
-        OneSignal.getUserId(function(playerId) {
+      OneSignal.User.PushSubscription.addEventListener('change', function(event) {
+        if (event.current.optedIn) {
+          const playerId = event.current.id;
           if (!playerId) return;
           localStorage.setItem('onesignal_player_id', playerId);
           try {
@@ -79,7 +60,24 @@
               localStorage.setItem('rega_players', JSON.stringify(players));
             }
           } catch(e) {}
-        });
+        }
+      });
+
+      // Verifica se já está inscrito e atualiza o player_id salvo
+      const isEnabled = OneSignal.User.PushSubscription.optedIn;
+      if (isEnabled) {
+        const playerId = OneSignal.User.PushSubscription.id;
+        if (playerId) {
+          localStorage.setItem('onesignal_player_id', playerId);
+          try {
+            const loggedUserId = localStorage.getItem('rega_logged_user');
+            if (loggedUserId) {
+              const players = JSON.parse(localStorage.getItem('rega_players') || '{}');
+              players[loggedUserId] = playerId;
+              localStorage.setItem('rega_players', JSON.stringify(players));
+            }
+          } catch(e) {}
+        }
       }
     });
   </script>
@@ -526,9 +524,8 @@ function getResponsible(dateKey, sched) {
 async function requestNotif() {
   if (window.OneSignal) {
     try {
-      await window.OneSignal.showSlidedownPrompt({ force: true });
+      await window.OneSignal.Slidedown.promptPush({ force: true });
     } catch(e) {
-      // fallback: pede permissão nativa do navegador diretamente
       await Notification.requestPermission();
     }
   }
@@ -538,10 +535,9 @@ async function requestNotif() {
 function checkNotifButton() {
   if (!window.OneSignal) return;
   window.OneSignalDeferred.push(function(OneSignal) {
-    OneSignal.isPushNotificationsEnabled(function(enabled) {
-      const btn = document.getElementById('notif-btn');
-      if (btn) btn.style.display = enabled ? 'none' : 'flex';
-    });
+    const enabled = OneSignal.User.PushSubscription.optedIn;
+    const btn = document.getElementById('notif-btn');
+    if (btn) btn.style.display = enabled ? 'none' : 'flex';
   });
 }
 
@@ -592,13 +588,12 @@ function doLogin() {
     // Salva player_id do OneSignal associado ao usuário
     if (window.OneSignal) {
       window.OneSignalDeferred.push(function(OneSignal) {
-        OneSignal.getUserId(function(pid) {
-          if (pid) {
-            const players = JSON.parse(localStorage.getItem('rega_players') || '{}');
-            players[u.id] = pid;
-            localStorage.setItem('rega_players', JSON.stringify(players));
-          }
-        });
+        const pid = OneSignal.User.PushSubscription.id;
+        if (pid) {
+          const players = JSON.parse(localStorage.getItem('rega_players') || '{}');
+          players[u.id] = pid;
+          localStorage.setItem('rega_players', JSON.stringify(players));
+        }
       });
     }
     showApp();
