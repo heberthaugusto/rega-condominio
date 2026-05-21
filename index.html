@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f1a0f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Rega" />
+  <title>Rega do Condomínio</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- OneSignal -->
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: "0968fd1e-5da0-4a20-bf3f-991dbe8f7b2f",
+        safari_web_id: "web.onesignal.auto.69a0d04c-4cfa-4f80-8d34-652264ce8748",
+        notifyButton: { enable: false },
+        welcomeNotification: { disable: true },
+      });
+      // Salva o userId do OneSignal no storage para envio de notificações direcionadas
+      OneSignal.on('subscriptionChange', function(isSubscribed) {
+        if (isSubscribed) {
+          OneSignal.getUserId(function(userId) {
+            if (userId) localStorage.setItem('onesignal_player_id', userId);
+          });
+        }
+      });
+    });
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #0f1a0f; font-family: 'DM Sans', sans-serif; color: #e8f5e8; }
+    body { overflow-x: hidden; }
+    #app { min-height: 100dvh; max-width: 480px; margin: 0 auto; position: relative; }
+    button { font-family: 'DM Sans', sans-serif; cursor: pointer; }
+    input { font-family: 'DM Sans', sans-serif; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #0f1a0f; }
+    ::-webkit-scrollbar-thumb { background: #2a3a2a; border-radius: 2px; }
+
+    /* BG texture */
+    .bg-texture {
+      position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      opacity: 0.04;
+      background-image: radial-gradient(circle, #4ade80 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    /* LOGIN */
+    #login-screen {
+      min-height: 100dvh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 24px;
+      position: relative; z-index: 1;
+    }
+    .login-logo { font-size: 52px; margin-bottom: 8px; }
+    .login-title { color: #4ade80; font-size: 28px; font-weight: 800; letter-spacing: -1px; }
+    .login-sub { color: #4ade8066; font-size: 14px; margin-top: 6px; margin-bottom: 32px; }
+    .user-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; width: 100%; max-width: 340px; margin-bottom: 24px; }
+    .user-btn {
+      background: #162016; border: 2px solid #2a3a2a; border-radius: 12px;
+      padding: 12px 8px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+      transition: all 0.15s;
+    }
+    .user-btn.selected { background: var(--user-color-alpha); border-color: var(--user-color); }
+    .user-btn span { font-size: 12px; font-weight: 600; color: #8aab8a; }
+    .user-btn.selected span { color: var(--user-color); }
+    .avatar {
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      font-weight: 700; color: #0f1a0f; flex-shrink: 0;
+    }
+    .password-area { width: 100%; max-width: 340px; animation: fadeIn 0.2s ease; }
+    .password-area input {
+      width: 100%; padding: 14px 16px; border-radius: 12px;
+      border: 2px solid #2a3a2a; background: #162016; color: #e8f5e8;
+      font-size: 16px; outline: none; margin-bottom: 12px;
+    }
+    .password-area input:focus { border-color: #4ade8066; }
+    .login-error { color: #fb7185; font-size: 13px; text-align: center; margin-bottom: 12px; }
+    .login-btn {
+      width: 100%; padding: 14px; border-radius: 12px; border: none;
+      font-weight: 800; font-size: 16px; letter-spacing: -0.5px;
+      color: #0f1a0f; transition: opacity 0.15s;
+    }
+    .login-btn:active { opacity: 0.8; }
+
+    /* MAIN APP */
+    #main-app { display: none; flex-direction: column; min-height: 100dvh; position: relative; z-index: 1; }
+    #main-app.visible { display: flex; }
+
+    /* HEADER */
+    .header {
+      padding: 14px 16px 10px; background: #0f1a0fa0;
+      backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 10;
+      border-bottom: 1px solid #1e2e1e;
+    }
+    .header-top { display: flex; align-items: center; justify-content: space-between; }
+    .header-brand { display: flex; align-items: center; gap: 10px; }
+    .header-brand-icon { font-size: 24px; }
+    .header-brand-name { font-size: 18px; font-weight: 800; color: #4ade80; letter-spacing: -0.5px; }
+    .header-brand-sub { font-size: 11px; color: #4a6a4a; }
+    .header-right { display: flex; align-items: center; gap: 8px; }
+    .notif-btn {
+      background: #1e2e1e; border: 1px solid #2a3a2a; border-radius: 8px;
+      padding: 6px 10px; color: #fbbf24; font-size: 12px; font-weight: 600;
+    }
+    .user-header { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .user-header-name { font-size: 13px; font-weight: 700; }
+    .user-header-sub { font-size: 10px; color: #4a6a4a; }
+    .next-day-banner {
+      margin-top: 10px; padding: 10px 14px; border-radius: 10px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .next-day-banner .icon { font-size: 20px; }
+    .next-day-label { font-size: 12px; font-weight: 700; }
+    .next-day-date { font-size: 13px; color: #e8f5e8; }
+
+    /* NAV MÊS */
+    .month-nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 16px 6px;
+    }
+    .month-nav-btn {
+      background: #1e2e1e; border: 1px solid #2a3a2a; border-radius: 8px;
+      padding: 6px 14px; color: #e8f5e8; font-size: 18px;
+    }
+    .month-nav-title { font-size: 18px; font-weight: 800; color: #4ade80; letter-spacing: -0.5px; }
+
+    /* CALENDÁRIO */
+    .dow-labels { display: grid; grid-template-columns: repeat(7,1fr); padding: 0 10px 2px; }
+    .dow-label { text-align: center; font-size: 11px; font-weight: 700; color: #4a6a4a; padding: 4px 0; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7,1fr); padding: 0 10px 10px; gap: 3px; }
+    .cal-cell {
+      aspect-ratio: 1; border-radius: 10px; padding: 4px;
+      background: #162016; border: 1.5px solid #1e2e1e;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: space-between; transition: all 0.1s; position: relative;
+      overflow: hidden;
+    }
+    .cal-cell:active { transform: scale(0.92); }
+    .cal-cell.today { background: #1e3a1e; border: 2px solid #4ade80; }
+    .cal-cell.my-day { border-color: var(--cell-color-alpha); }
+    .cal-cell-num {
+      font-size: 12px; font-weight: 600; color: #e8f5e8;
+      align-self: flex-start; line-height: 1;
+    }
+    .cal-cell.today .cal-cell-num { color: #4ade80; font-weight: 800; font-size: 13px; }
+    .cal-cell-indicator { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+    .cal-cell-indicator .emoji { font-size: 13px; line-height: 1; }
+    .mini-avatar {
+      width: 18px; height: 18px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; color: #0f1a0f;
+    }
+
+    /* LEGENDA */
+    .legend {
+      margin: 0 10px 16px; background: #162016; border-radius: 12px;
+      padding: 12px 14px;
+    }
+    .legend-title { font-size: 11px; font-weight: 700; color: #4a6a4a; margin-bottom: 8px; letter-spacing: 1px; }
+    .legend-items { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; }
+    .legend-item { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #8aab8a; }
+    .legend-users { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+    .legend-user { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #8aab8a; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* MODAL */
+    .modal-overlay {
+      position: fixed; inset: 0; background: #000000bb; z-index: 100;
+      display: flex; align-items: flex-end; animation: fadeIn 0.15s ease;
+    }
+    .modal-sheet {
+      width: 100%; max-width: 480px; margin: 0 auto;
+      background: #162016; border-radius: 20px 20px 0 0;
+      padding: 24px 20px 40px; animation: slideUp 0.22s ease;
+    }
+    .modal-date-dow { font-size: 13px; color: #4a6a4a; text-align: center; margin-bottom: 4px; }
+    .modal-date { font-size: 24px; font-weight: 800; color: #4ade80; text-align: center; letter-spacing: -1px; margin-bottom: 20px; }
+    .modal-info-box {
+      background: #0f1a0f; border-radius: 12px; padding: 14px;
+      margin-bottom: 12px; display: flex; align-items: center; gap: 12px;
+    }
+    .modal-info-box .big-emoji { font-size: 28px; }
+    .modal-info-title { font-weight: 700; font-size: 15px; }
+    .modal-info-sub { font-size: 13px; color: #4a6a4a; margin-top: 2px; }
+    .modal-record {
+      border-radius: 10px; padding: 10px 14px; margin-bottom: 8px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .modal-record .rec-emoji { font-size: 18px; }
+    .modal-record .rec-title { font-size: 13px; font-weight: 700; }
+    .modal-record .rec-sub { font-size: 12px; color: #4a6a4a; }
+    .modal-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+    .action-btn {
+      padding: 14px; border-radius: 12px; border: none;
+      font-weight: 800; font-size: 15px; width: 100%;
+      transition: opacity 0.15s;
+    }
+    .action-btn:active { opacity: 0.8; }
+    .action-btn-outline {
+      padding: 13px; border-radius: 12px; font-weight: 700;
+      font-size: 14px; width: 100%; background: transparent;
+      transition: opacity 0.15s;
+    }
+    .action-btn-outline:active { opacity: 0.7; }
+    .action-btn-close {
+      padding: 12px; border-radius: 12px; border: 1px solid #2a3a2a;
+      background: transparent; color: #4a6a4a; font-weight: 600;
+      font-size: 14px; width: 100%;
+    }
+
+    /* TOAST */
+    .toast {
+      position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
+      background: #1e3a1e; border: 1px solid #4ade8044; border-radius: 12px;
+      padding: 12px 20px; color: #4ade80; font-weight: 600; font-size: 14px;
+      z-index: 200; animation: slideUp 0.2s ease; white-space: nowrap;
+      box-shadow: 0 4px 24px #00000066;
+    }
+
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-8px)} 75%{transform:translateX(8px)} }
+    .shake { animation: shake 0.4s ease; }
+  </style>
+</head>
+<body>
+<div class="bg-texture"></div>
+<div id="app">
+  <!-- LOGIN -->
+  <div id="login-screen">
+    <div class="login-logo">🌿</div>
+    <div class="login-title">Rega do Condomínio</div>
+    <div class="login-sub">Quem é você hoje?</div>
+    <div class="user-grid" id="user-grid"></div>
+    <div class="password-area" id="password-area" style="display:none">
+      <input type="password" id="password-input" placeholder="Senha" autocomplete="current-password" />
+      <div class="login-error" id="login-error" style="display:none">Senha incorreta</div>
+      <button class="login-btn" id="login-btn">Entrar</button>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="main-app">
+    <div class="header">
+      <div class="header-top">
+        <div class="header-brand">
+          <div class="header-brand-icon">🌿</div>
+          <div>
+            <div class="header-brand-name">Rega</div>
+            <div class="header-brand-sub">Condomínio</div>
+          </div>
+        </div>
+        <div class="header-right">
+          <button class="notif-btn" id="notif-btn" style="display:none" onclick="requestNotif()">🔔 Ativar alertas</button>
+          <div class="user-header" onclick="logout()">
+            <div class="avatar" id="header-avatar" style="width:34px;height:34px;font-size:14px"></div>
+            <div>
+              <div class="user-header-name" id="header-name"></div>
+              <div class="user-header-sub">Sair</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="next-day-banner" id="next-day-banner" style="display:none">
+        <div class="icon">💧</div>
+        <div>
+          <div class="next-day-label" id="next-day-label">Sua próxima rega</div>
+          <div class="next-day-date" id="next-day-date"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="month-nav">
+      <button class="month-nav-btn" onclick="prevMonth()">‹</button>
+      <div class="month-nav-title" id="month-title"></div>
+      <button class="month-nav-btn" onclick="nextMonth()">›</button>
+    </div>
+
+    <div class="dow-labels">
+      <div class="dow-label">Dom</div><div class="dow-label">Seg</div>
+      <div class="dow-label">Ter</div><div class="dow-label">Qua</div>
+      <div class="dow-label">Qui</div><div class="dow-label">Sex</div>
+      <div class="dow-label">Sáb</div>
+    </div>
+    <div class="cal-grid" id="cal-grid"></div>
+
+    <div class="legend">
+      <div class="legend-title">LEGENDA</div>
+      <div class="legend-items">
+        <div class="legend-item">✅ Regado</div>
+        <div class="legend-item">🙋 Voluntário</div>
+        <div class="legend-item">⏭️ Não pôde</div>
+        <div class="legend-item">🌧️ Chuva/dispensa</div>
+      </div>
+      <div class="legend-users" id="legend-users"></div>
+    </div>
+  </div>
+
+  <!-- MODAL -->
+  <div class="modal-overlay" id="modal" style="display:none" onclick="closeModal(event)">
+    <div class="modal-sheet" id="modal-sheet"></div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast" style="display:none"></div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// CONFIGURAÇÃO
+// ═══════════════════════════════════════════════════════
+const USERS = [
+  { id: 'heberth', name: 'Heberth', password: 'heberth123', color: '#4ade80' },
+  { id: 'simone',  name: 'Simone',  password: 'simone123',  color: '#60a5fa' },
+  { id: 'flavio',  name: 'Flávio',  password: 'flavio123',  color: '#f97316' },
+  { id: 'bruno',   name: 'Bruno',   password: 'bruno123',   color: '#a78bfa' },
+  { id: 'luciano', name: 'Luciano', password: 'luciano123', color: '#fb7185' },
+  { id: 'karina',  name: 'Karina',  password: 'karina123',  color: '#fbbf24' },
+];
+
+const GROUP_A = ['heberth', 'simone', 'flavio', 'bruno', 'luciano'];
+const START_A  = new Date(2026, 4, 19); // 19/05/2026
+const START_K  = new Date(2026, 4, 17); // 17/05/2026
+
+// ═══════════════════════════════════════════════════════
+// UTILITÁRIOS DE DATA
+// ═══════════════════════════════════════════════════════
+const toKey  = d => `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;
+const p2     = n => String(n).padStart(2,'0');
+const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r; };
+const isSun  = d => d.getDay() === 0;
+const todayD = () => { const d=new Date(); d.setHours(0,0,0,0); return d; };
+const cloneD = d => new Date(d.getTime());
+
+const MONTH_NAMES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+                     'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const DOW_NAMES   = ['domingo','segunda-feira','terça-feira','quarta-feira',
+                     'quinta-feira','sexta-feira','sábado'];
+
+const getUserById = id => USERS.find(u => u.id === id);
+
+// ═══════════════════════════════════════════════════════
+// ESTADO
+// ═══════════════════════════════════════════════════════
+let currentUser   = null;
+let selectedUserId = null;
+let currentMonth  = new Date(2026, 4, 1);
+let records    = {}; // { 'YYYY-MM-DD': { by, at } }
+let rainDays   = {}; // { 'YYYY-MM-DD': true }
+let skipped    = {}; // { 'YYYY-MM-DD': { by, at } }
+let volunteered = {}; // { 'YYYY-MM-DD': { by, at } }
+
+// ═══════════════════════════════════════════════════════
+// STORAGE (compartilhado via window.storage do Claude)
+// ═══════════════════════════════════════════════════════
+async function loadAll() {
+  try {
+    const [r, ra, sk, vo] = await Promise.all([
+      window.storage.get('rega-records', true).catch(()=>null),
+      window.storage.get('rega-rain', true).catch(()=>null),
+      window.storage.get('rega-skipped', true).catch(()=>null),
+      window.storage.get('rega-volunteered', true).catch(()=>null),
+    ]);
+    records     = r  ? JSON.parse(r.value)  : {};
+    rainDays    = ra ? JSON.parse(ra.value) : {};
+    skipped     = sk ? JSON.parse(sk.value) : {};
+    volunteered = vo ? JSON.parse(vo.value) : {};
+  } catch(e) {
+    records = {}; rainDays = {}; skipped = {}; volunteered = {};
+  }
+}
+
+async function save(key, data) {
+  try { await window.storage.set(key, JSON.stringify(data), true); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════
+// ALGORITMO DE CALENDÁRIO
+// ═══════════════════════════════════════════════════════
+// Retorna objeto { 'YYYY-MM-DD': { groupA?: userId, karina?: true } }
+function buildSchedule(fromDate, toDate) {
+  const sched = {};
+
+  // Karina: domingos alternados a partir de START_K
+  let kd = cloneD(START_K);
+  while (kd <= toDate) {
+    if (kd >= fromDate) {
+      const k = toKey(kd);
+      sched[k] = sched[k] || {};
+      sched[k].karina = true;
+    }
+    kd = addDays(kd, 14);
+  }
+
+  // Grupo A: dia sim dia não, sem domingos
+  let cur = cloneD(START_A);
+  let idx = 0;
+
+  while (cur <= toDate) {
+    // pula domingo
+    if (isSun(cur)) { cur = addDays(cur, 1); continue; }
+
+    const key = toKey(cur);
+    if (cur >= fromDate) {
+      sched[key] = sched[key] || {};
+      sched[key].groupA = GROUP_A[idx % GROUP_A.length];
+    }
+
+    // calcula próximo: +2 dias
+    let next = addDays(cur, 2);
+    // se cair no domingo, avança para segunda (+1)
+    if (isSun(next)) next = addDays(next, 1);
+
+    // se houver chuva entre cur e next, recalcula
+    let rainHit = null;
+    for (let ri = 1; ri < 3; ri++) {
+      const rd = addDays(cur, ri);
+      if (rainDays[toKey(rd)]) { rainHit = rd; break; }
+    }
+    if (rainHit) {
+      // dispensa o dia da chuva e o seguinte, retoma no subsequente
+      next = addDays(rainHit, 2);
+      if (isSun(next)) next = addDays(next, 1);
+    }
+
+    idx++;
+    cur = next;
+  }
+
+  return sched;
+}
+
+function getScheduleFor(d) {
+  const from = new Date(d.getFullYear(), d.getMonth(), 1);
+  const to   = new Date(d.getFullYear(), d.getMonth()+1, 0);
+  // Precisamos de um range maior para calcular corretamente a partir do início
+  const bigFrom = new Date(2026, 4, 1);
+  return buildSchedule(bigFrom, to);
+}
+
+function getResponsible(dateKey, sched) {
+  const s = sched[dateKey];
+  if (!s) return null;
+  if (s.karina) return 'karina';
+  if (s.groupA) return s.groupA;
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════
+// NOTIFICAÇÕES (OneSignal + agendamento)
+// ═══════════════════════════════════════════════════════
+async function requestNotif() {
+  if (window.OneSignal) {
+    await window.OneSignal.showSlidedownPrompt();
+  }
+  document.getElementById('notif-btn').style.display = 'none';
+}
+
+function checkNotifButton() {
+  if (!window.OneSignal) return;
+  window.OneSignalDeferred.push(function(OneSignal) {
+    OneSignal.isPushNotificationsEnabled(function(enabled) {
+      const btn = document.getElementById('notif-btn');
+      if (btn) btn.style.display = enabled ? 'none' : 'flex';
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+// LOGIN
+// ═══════════════════════════════════════════════════════
+function renderLoginUsers() {
+  const grid = document.getElementById('user-grid');
+  grid.innerHTML = '';
+  USERS.forEach(u => {
+    const btn = document.createElement('button');
+    btn.className = 'user-btn';
+    btn.style.setProperty('--user-color', u.color);
+    btn.style.setProperty('--user-color-alpha', u.color + '22');
+    btn.innerHTML = `
+      <div class="avatar" style="width:36px;height:36px;font-size:14px;background:${u.color};box-shadow:0 0 0 2px #0f1a0f,0 0 0 3px ${u.color}44">
+        ${u.name[0]}
+      </div>
+      <span>${u.name}</span>
+    `;
+    btn.onclick = () => selectUser(u.id);
+    grid.appendChild(btn);
+  });
+}
+
+function selectUser(userId) {
+  selectedUserId = userId;
+  document.querySelectorAll('.user-btn').forEach((btn, i) => {
+    btn.classList.toggle('selected', USERS[i].id === userId);
+  });
+  const u = getUserById(userId);
+  const passArea = document.getElementById('password-area');
+  passArea.style.display = 'block';
+  const btn = document.getElementById('login-btn');
+  btn.style.background = u.color;
+  document.getElementById('password-input').value = '';
+  document.getElementById('login-error').style.display = 'none';
+  document.getElementById('password-input').focus();
+}
+
+function doLogin() {
+  if (!selectedUserId) return;
+  const u = getUserById(selectedUserId);
+  const pass = document.getElementById('password-input').value;
+  if (pass === u.password) {
+    currentUser = u;
+    localStorage.setItem('rega_logged_user', u.id);
+    // Salva player_id do OneSignal associado ao usuário
+    if (window.OneSignal) {
+      window.OneSignalDeferred.push(function(OneSignal) {
+        OneSignal.getUserId(function(pid) {
+          if (pid) {
+            const players = JSON.parse(localStorage.getItem('rega_players') || '{}');
+            players[u.id] = pid;
+            localStorage.setItem('rega_players', JSON.stringify(players));
+            save('rega-players', players);
+          }
+        });
+      });
+    }
+    showApp();
+  } else {
+    const errEl = document.getElementById('login-error');
+    errEl.style.display = 'block';
+    const passArea = document.getElementById('password-area');
+    passArea.classList.add('shake');
+    setTimeout(() => passArea.classList.remove('shake'), 500);
+  }
+}
+
+function logout() {
+  currentUser = null;
+  localStorage.removeItem('rega_logged_user');
+  document.getElementById('main-app').classList.remove('visible');
+  document.getElementById('login-screen').style.display = 'flex';
+  selectedUserId = null;
+  document.getElementById('password-area').style.display = 'none';
+  document.querySelectorAll('.user-btn').forEach(b => b.classList.remove('selected'));
+}
+
+// ═══════════════════════════════════════════════════════
+// APP PRINCIPAL
+// ═══════════════════════════════════════════════════════
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('main-app').classList.add('visible');
+
+  // Header
+  const u = currentUser;
+  const av = document.getElementById('header-avatar');
+  av.style.background = u.color;
+  av.style.boxShadow  = `0 0 0 2px #0f1a0f, 0 0 0 3px ${u.color}44`;
+  av.textContent = u.name[0];
+  const nameEl = document.getElementById('header-name');
+  nameEl.textContent = u.name;
+  nameEl.style.color = u.color;
+
+  checkNotifButton();
+  renderNextDay();
+  renderCalendar();
+  renderLegend();
+}
+
+function renderNextDay() {
+  const banner = document.getElementById('next-day-banner');
+  const sched  = buildSchedule(new Date(2026,4,1), addDays(todayD(), 120));
+  const t = todayD();
+
+  // Busca próximo dia do usuário atual
+  for (let i = 0; i <= 120; i++) {
+    const d = addDays(t, i);
+    const key = toKey(d);
+    const resp = getResponsible(key, sched);
+    if (resp !== currentUser.id) continue;
+    if (records[key]) continue;
+    // Verifica chuva
+    const prevKey = toKey(addDays(d,-1));
+    if (rainDays[key] || rainDays[prevKey]) continue;
+    // Encontrou!
+    const label = i === 0 ? 'Hoje é seu dia de regar! 💧' :
+                  i === 1 ? 'Amanhã é seu dia de regar!' :
+                  `Sua próxima rega`;
+    document.getElementById('next-day-label').textContent = label;
+    document.getElementById('next-day-date').textContent =
+      d.toLocaleDateString('pt-BR', { weekday:'long', day:'numeric', month:'long' });
+    banner.style.display = 'flex';
+    banner.style.background = currentUser.color + '18';
+    banner.style.border = `1px solid ${currentUser.color}33`;
+    document.getElementById('next-day-label').style.color = currentUser.color;
+    return;
+  }
+  banner.style.display = 'none';
+}
+
+function renderCalendar() {
+  const y = currentMonth.getFullYear();
+  const m = currentMonth.getMonth();
+  document.getElementById('month-title').textContent = `${MONTH_NAMES[m]} ${y}`;
+
+  const firstDay = new Date(y, m, 1);
+  const lastDay  = new Date(y, m+1, 0);
+  const sched    = getScheduleFor(currentMonth);
+  const today    = todayD();
+
+  const grid = document.getElementById('cal-grid');
+  grid.innerHTML = '';
+
+  // Padding inicial
+  for (let i = 0; i < firstDay.getDay(); i++) {
+    grid.appendChild(document.createElement('div'));
+  }
+
+  for (let day = 1; day <= lastDay.getDate(); day++) {
+    const d   = new Date(y, m, day);
+    const key = toKey(d);
+    const resp = getResponsible(key, sched);
+    const respUser = resp ? getUserById(resp) : null;
+
+    const isToday   = toKey(d) === toKey(today);
+    const isMyDay   = resp === currentUser.id;
+    const isRain    = rainDays[key];
+    const prevKey   = toKey(addDays(d,-1));
+    const isAfterRain = rainDays[prevKey] && !isRain;
+    const noWater   = isRain || isAfterRain;
+    const watered   = records[key];
+    const wasSkipped = skipped[key];
+    const volunteerW = volunteered[key];
+
+    const cell = document.createElement('div');
+    cell.className = 'cal-cell' + (isToday ? ' today' : '') + (isMyDay && !noWater ? ' my-day' : '');
+    if (isMyDay && !noWater && respUser) {
+      cell.style.setProperty('--cell-color-alpha', respUser.color + '55');
+      cell.style.background = respUser.color + '12';
+    }
+    cell.onclick = () => openModal(key, d);
+
+    // Número
+    const num = document.createElement('div');
+    num.className = 'cal-cell-num';
+    num.textContent = day;
+    cell.appendChild(num);
+
+    // Indicador
+    const ind = document.createElement('div');
+    ind.className = 'cal-cell-indicator';
+
+    if (noWater) {
+      ind.innerHTML = `<span class="emoji">🌧️</span>`;
+    } else if (watered) {
+      ind.innerHTML = `<span class="emoji">✅</span>`;
+    } else if (volunteerW) {
+      ind.innerHTML = `<span class="emoji">🙋</span>`;
+    } else if (wasSkipped) {
+      ind.innerHTML = `<span class="emoji">⏭️</span>`;
+    } else if (respUser) {
+      const av = document.createElement('div');
+      av.className = 'mini-avatar';
+      av.style.background = respUser.color;
+      av.textContent = respUser.name[0];
+      ind.appendChild(av);
+    }
+
+    cell.appendChild(ind);
+    grid.appendChild(cell);
+  }
+}
+
+function renderLegend() {
+  const el = document.getElementById('legend-users');
+  el.innerHTML = USERS.map(u => `
+    <div class="legend-user">
+      <div class="legend-dot" style="background:${u.color}"></div>
+      ${u.name}${u.id === 'karina' ? ' (Dom)' : ''}
+    </div>
+  `).join('');
+}
+
+function prevMonth() {
+  currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()-1, 1);
+  renderCalendar();
+}
+
+function nextMonth() {
+  currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 1);
+  renderCalendar();
+}
+
+// ═══════════════════════════════════════════════════════
+// MODAL
+// ═══════════════════════════════════════════════════════
+let modalKey = null;
+let modalDate = null;
+
+function openModal(key, d) {
+  modalKey  = key;
+  modalDate = d;
+
+  const sched    = getScheduleFor(d);
+  const resp     = getResponsible(key, sched);
+  const respUser = resp ? getUserById(resp) : null;
+  const isRain   = rainDays[key];
+  const prevKey  = toKey(addDays(d,-1));
+  const isAfterRain = rainDays[prevKey] && !isRain;
+  const noWater  = isRain || isAfterRain;
+  const watered  = records[key];
+  const wasSkipped = skipped[key];
+  const volunteerW = volunteered[key];
+  const isMyDay  = resp === currentUser.id;
+  const isPast   = d <= todayD();
+  const wateredBy  = watered    ? getUserById(watered.by)    : null;
+  const volunteerBy = volunteerW ? getUserById(volunteerW.by) : null;
+
+  let html = `
+    <div class="modal-date-dow">${DOW_NAMES[d.getDay()]}</div>
+    <div class="modal-date">${d.toLocaleDateString('pt-BR',{day:'numeric',month:'long',year:'numeric'})}</div>
+  `;
+
+  // Info box
+  if (noWater) {
+    html += `
+      <div class="modal-info-box">
+        <div class="big-emoji">🌧️</div>
+        <div>
+          <div class="modal-info-title" style="color:#60a5fa">
+            ${isRain ? 'Chuva registrada' : 'Dia após chuva'}
+          </div>
+          <div class="modal-info-sub">Não é necessário regar</div>
+        </div>
+        ${isRain ? `<button onclick="removeRain('${key}')" style="margin-left:auto;background:#1e2e1e;border:1px solid #2a3a2a;border-radius:8px;padding:4px 10px;color:#fb7185;font-size:12px;font-weight:600">Remover</button>` : ''}
+      </div>`;
+  } else if (respUser) {
+    html += `
+      <div class="modal-info-box">
+        <div class="avatar" style="width:42px;height:42px;font-size:17px;background:${respUser.color};box-shadow:0 0 0 2px #0f1a0f,0 0 0 3px ${respUser.color}44;flex-shrink:0">
+          ${respUser.name[0]}
+        </div>
+        <div>
+          <div class="modal-info-sub">Responsável</div>
+          <div class="modal-info-title" style="color:${respUser.color};font-size:16px">${respUser.name}</div>
+          ${resp === 'karina' ? '<div style="font-size:11px;color:#4a6a4a">🌿 Domingo da Karina</div>' : ''}
+        </div>
+      </div>`;
+  } else {
+    html += `<div class="modal-info-box" style="justify-content:center;color:#4a6a4a">Dia sem rega programada</div>`;
+  }
+
+  // Registros existentes
+  if (watered) {
+    html += `<div class="modal-record" style="background:#4ade8015;border:1px solid #4ade8033">
+      <div class="rec-emoji">✅</div>
+      <div><div class="rec-title" style="color:#4ade80">Regado!</div>
+      <div class="rec-sub">por ${wateredBy?.name || '?'}</div></div>
+    </div>`;
+  }
+  if (volunteerW) {
+    html += `<div class="modal-record" style="background:#60a5fa15;border:1px solid #60a5fa33">
+      <div class="rec-emoji">🙋</div>
+      <div><div class="rec-title" style="color:#60a5fa">Voluntário regou</div>
+      <div class="rec-sub">por ${volunteerBy?.name || '?'}</div></div>
+    </div>`;
+  }
+  if (wasSkipped) {
+    html += `<div class="modal-record" style="background:#fb718515;border:1px solid #fb718533">
+      <div class="rec-emoji">⏭️</div>
+      <div><div class="rec-title" style="color:#fb7185">Não pôde regar</div></div>
+    </div>`;
+  }
+
+  // Ações
+  html += `<div class="modal-actions">`;
+
+  // Confirmar rega: responsável no dia (passado ou hoje), ou qualquer um se foi pulado
+  if (!noWater && respUser && !watered && isPast && isMyDay) {
+    html += `<button class="action-btn" style="background:#4ade80;color:#0f1a0f" onclick="confirmWatered()">💧 Confirmei que reguei!</button>`;
+  }
+
+  // Não pôde: só o responsável, só se não regou e não pulou
+  if (!noWater && isMyDay && !watered && !wasSkipped) {
+    html += `<button class="action-btn-outline" style="border:1px solid #fb718544;color:#fb7185" onclick="confirmSkip()">😔 Não consegui regar</button>`;
+  }
+
+  // Voluntário: qualquer um que não seja o responsável, se foi pulado e não regado
+  if (!noWater && respUser && wasSkipped && !watered && !volunteerW && !isMyDay) {
+    html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">🙋 Eu reguei no lugar!</button>`;
+  }
+
+  // Registrar chuva: qualquer um, se ainda não registrou
+  if (!isRain) {
+    html += `<button class="action-btn-outline" style="border:1px solid #60a5fa44;color:#60a5fa" onclick="confirmRain()">🌧️ Choveu neste dia</button>`;
+  }
+
+  html += `<button class="action-btn-close" onclick="closeModal()">Fechar</button>`;
+  html += `</div>`;
+
+  document.getElementById('modal-sheet').innerHTML = html;
+  document.getElementById('modal').style.display = 'flex';
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modal')) return;
+  document.getElementById('modal').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════════════
+// AÇÕES
+// ═══════════════════════════════════════════════════════
+async function confirmWatered() {
+  records[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
+  await save('rega-records', records);
+  showToast('✅ Rega registrada!');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
+}
+
+async function confirmSkip() {
+  skipped[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
+  await save('rega-skipped', skipped);
+  showToast('⏭️ Registrado que não pôde regar');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+}
+
+async function confirmVolunteer() {
+  volunteered[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
+  await save('rega-volunteered', volunteered);
+  showToast('🙋 Obrigado por se voluntariar!');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
+}
+
+async function confirmRain() {
+  rainDays[modalKey] = true;
+  await save('rega-rain', rainDays);
+  showToast('🌧️ Chuva registrada!');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
+}
+
+async function removeRain(key) {
+  delete rainDays[key];
+  await save('rega-rain', rainDays);
+  showToast('☀️ Registro de chuva removido');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
+}
+
+// ═══════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2500);
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+async function init() {
+  renderLoginUsers();
+
+  // Event listeners
+  document.getElementById('password-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') doLogin();
+  });
+  document.getElementById('login-btn').addEventListener('click', doLogin);
+
+  // Carrega dados
+  await loadAll();
+
+  // Auto-login
+  const saved = localStorage.getItem('rega_logged_user');
+  if (saved) {
+    const u = getUserById(saved);
+    if (u) { currentUser = u; showApp(); return; }
+  }
+}
+
+init();
+</script>
+</body>
+</html>
