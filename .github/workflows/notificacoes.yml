@@ -1,255 +1,243 @@
 name: Notificações de Rega
 
 on:
- schedule:
-   # 19h55 horário de Brasília = 22h55 UTC (lembrete véspera)
-   - cron: '55 22 * * *'
-   # 07h55 horário de Brasília = 10h55 UTC (lembrete no dia)
-   - cron: '55 10 * * *'
- workflow_dispatch:
+  schedule:
+    # 19h55 horário de Brasília = 22h55 UTC (lembrete véspera)
+    - cron: '55 22 * * *'
+    # 07h55 horário de Brasília = 10h55 UTC (lembrete no dia)
+    - cron: '55 10 * * *'
+  workflow_dispatch:
 
 jobs:
- notificar:
-   runs-on: ubuntu-latest
-   steps:
-     - name: Enviar notificação via FCM
-       env:
-         FIREBASE_PROJECT_ID: "rega-condominio"
-         FIREBASE_CLIENT_EMAIL: "firebase-adminsdk-fbsvc@rega-condominio.iam.gserviceaccount.com"
-         FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
-       run: |
-         node << 'SCRIPT'
-         const https = require('https');
-         const crypto = require('crypto');
+  notificar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instalar dependência web-push
+        run: npm install web-push
 
-         const PROJECT_ID    = process.env.FIREBASE_PROJECT_ID;
-         const CLIENT_EMAIL  = process.env.FIREBASE_CLIENT_EMAIL;
-         const PRIVATE_KEY   = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+      - name: Enviar notificações via Web Push nativo
+        env:
+          FIREBASE_PROJECT_ID:   "rega-condominio"
+          FIREBASE_CLIENT_EMAIL: "firebase-adminsdk-fbsvc@rega-condominio.iam.gserviceaccount.com"
+          FIREBASE_PRIVATE_KEY:  ${{ secrets.FIREBASE_PRIVATE_KEY }}
+          VAPID_PUBLIC_KEY:      "BJNUDISSu-_hn1c8VxcsV9I_8oePTVeiMoyFvetvxFeY3LQeNVAfxrBv3Gk7KzaSj_4Bo_H6BaNj8tAX57c9-ec"
+          VAPID_PRIVATE_KEY:     ${{ secrets.VAPID_PRIVATE_KEY }}
+        run: |
+          node << 'SCRIPT'
+          const https    = require('https');
+          const crypto   = require('crypto');
+          const webpush  = require('web-push');
 
-         // Grupo A: âncora = Simone em 21/05/2026; molha 1 dia, folga 2 (intervalo +3)
-         // Regra Karina: candidato no próprio domingo ou na véspera → pula para Karina+3
-         const GROUP_A    = ['simone','flavio','bruno','luciano','heberth'];
-         const START_A    = new Date('2026-05-21T00:00:00-03:00');
-         const START_K    = new Date('2026-05-17T00:00:00-03:00');
-         const USER_NAMES = {
-           heberth: 'Heberth', simone: 'Simone', flavio: 'Flávio',
-           bruno: 'Bruno', luciano: 'Luciano', karina: 'Karina'
-         };
+          // ── Configuração VAPID ──────────────────────────────────────────────
+          webpush.setVapidDetails(
+            'mailto:heberth@rega-condominio',
+            process.env.VAPID_PUBLIC_KEY,
+            process.env.VAPID_PRIVATE_KEY
+          );
 
-         const toKey   = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-         const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r; };
-         const isSun   = d => d.getDay() === 0;
+          // ── Configuração Firebase ───────────────────────────────────────────
+          const PROJECT_ID   = process.env.FIREBASE_PROJECT_ID;
+          const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
+          const PRIVATE_KEY  = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
 
-         const karinaSundays = new Set();
-         let kd = new Date(START_K);
-         while (kd <= addDays(new Date(), 400)) {
-           karinaSundays.add(toKey(kd));
-           kd = addDays(kd, 14);
-         }
+          // ── Calendário (mesma lógica do app) ────────────────────────────────
+          const GROUP_A    = ['simone','flavio','bruno','luciano','heberth'];
+          const START_A    = new Date('2026-05-21T00:00:00-03:00');
+          const START_K    = new Date('2026-05-17T00:00:00-03:00');
+          const USER_NAMES = {
+            heberth: 'Heberth', simone: 'Simone', flavio: 'Flávio',
+            bruno: 'Bruno', luciano: 'Luciano', karina: 'Karina'
+          };
 
-         // Verifica se d é segunda ou terça imediatamente após um domingo da Karina
-         function isPostKarina(d) {
-           const dow = d.getDay();
-           if (dow !== 1 && dow !== 2) return false;
-           return karinaSundays.has(toKey(addDays(d, -dow)));
-         }
+          const toKey   = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+          const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r; };
+          const isSun   = d => d.getDay() === 0;
 
-         function nextValid(candidate, rainDays) {
-           let d = new Date(candidate);
-           for (let g = 0; g < 60; g++) {
-             const key = toKey(d);
-             // 1. Chuva: pula 2 dias sem molhar → 3º dia após a chuva
-             if (rainDays && rainDays[key]) { d = addDays(d, 3); continue; }
-             // 2. Próprio domingo da Karina → domingo+3 (quarta)
-             if (karinaSundays.has(key)) { d = addDays(d, 3); continue; }
-             // 3. Véspera (sábado) de domingo da Karina → domingo+3 (quarta)
-             if (karinaSundays.has(toKey(addDays(d, 1)))) { d = addDays(d, 4); continue; }
-             // 4. Segunda ou terça imediatamente após domingo da Karina → quarta (domingo+3)
-             if (isPostKarina(d)) { d = addDays(addDays(d, -d.getDay()), 3); continue; }
-             // Grupo A pode regar em qualquer domingo comum
-             return d;
-           }
-           return d;
-         }
+          const karinaSundays = new Set();
+          let kd = new Date(START_K);
+          while (kd <= addDays(new Date(), 400)) {
+            karinaSundays.add(toKey(kd));
+            kd = addDays(kd, 14);
+          }
 
-         function getResponsibleFor(targetDate) {
-           const target = toKey(targetDate);
-           let cur = new Date(START_A);
-           let idx = 0;
-           while (cur <= addDays(targetDate, 1)) {
-             cur = nextValid(cur, null); // notificação não considera chuva (sem acesso ao Firestore aqui)
-             const curKey = toKey(cur);
-             if (curKey === target) return GROUP_A[idx % GROUP_A.length];
-             idx++;
-             cur = addDays(cur, 3);
-           }
-           return null;
-         }
+          function isPostKarina(d) {
+            const dow = d.getDay();
+            if (dow !== 1 && dow !== 2) return false;
+            return karinaSundays.has(toKey(addDays(d, -dow)));
+          }
 
-         const now = new Date();
-         const brNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-         const hour  = brNow.getHours();
+          function nextValid(candidate) {
+            let d = new Date(candidate);
+            for (let g = 0; g < 60; g++) {
+              const key = toKey(d);
+              if (karinaSundays.has(key)) { d = addDays(d, 3); continue; }
+              const tomorrowKey = toKey(addDays(d, 1));
+              if (karinaSundays.has(tomorrowKey)) { d = addDays(d, 4); continue; }
+              if (isPostKarina(d)) { d = addDays(addDays(d, -d.getDay()), 3); continue; }
+              return d;
+            }
+            return d;
+          }
 
-         let targetDate, tipoNotif;
-         if (hour >= 19) {
-           targetDate = addDays(brNow, 1);
-           tipoNotif  = 'vespera';
-         } else {
-           targetDate = new Date(brNow);
-           tipoNotif  = 'dia';
-         }
-         targetDate.setHours(0,0,0,0);
+          function getResponsibleFor(targetDate) {
+            const target = toKey(targetDate);
+            let cur = new Date(START_A);
+            let idx = 0;
+            while (cur <= addDays(targetDate, 1)) {
+              cur = nextValid(cur);
+              if (toKey(cur) === target) return GROUP_A[idx % GROUP_A.length];
+              idx++;
+              cur = addDays(cur, 3);
+            }
+            return null;
+          }
 
-         const respA = getResponsibleFor(targetDate);
-         const respK = karinaSundays.has(toKey(targetDate)) ? 'karina' : null;
-         const responsavel = respK || respA;
+          // ── Determina responsável do dia ─────────────────────────────────────
+          const now   = new Date();
+          const brNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+          const hour  = brNow.getHours();
 
-         if (!responsavel) {
-           console.log('Nenhum responsável — sem notificação.');
-           process.exit(0);
-         }
+          let targetDate, tipoNotif;
+          if (hour >= 19) {
+            targetDate = addDays(brNow, 1);
+            tipoNotif  = 'vespera';
+          } else {
+            targetDate = new Date(brNow);
+            tipoNotif  = 'dia';
+          }
+          targetDate.setHours(0,0,0,0);
 
-         const nome    = USER_NAMES[responsavel];
-         const dataStr = targetDate.toLocaleDateString('pt-BR', {
-           weekday:'long', day:'numeric', month:'long', timeZone:'America/Sao_Paulo'
-         });
+          const isKarinaDay = karinaSundays.has(toKey(targetDate));
+          const respA       = getResponsibleFor(targetDate);
+          const responsavel = isKarinaDay ? 'karina' : respA;
 
-         const titulo   = tipoNotif === 'vespera'
-           ? `🌿 Amanhã é seu dia de regar!`
-           : `💧 Hoje é seu dia de regar, ${nome}!`;
-         const mensagem = tipoNotif === 'vespera'
-           ? `${nome}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
-           : `Bom dia, ${nome}! Hoje (${dataStr}) é sua vez de molhar as plantas. Após regar, confirme no app! 🌱`;
+          if (!responsavel) {
+            console.log('Nenhum responsável — sem notificação.');
+            process.exit(0);
+          }
 
-         console.log(`Responsável: ${nome} (${tipoNotif})`);
-         console.log(`Título: ${titulo}`);
+          const nome    = USER_NAMES[responsavel];
+          const dataStr = targetDate.toLocaleDateString('pt-BR', {
+            weekday:'long', day:'numeric', month:'long', timeZone:'America/Sao_Paulo'
+          });
 
-         function base64url(str) {
-           return Buffer.from(str).toString('base64')
-             .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-         }
+          const titulo   = tipoNotif === 'vespera'
+            ? `🌿 Amanhã é seu dia de regar!`
+            : `💧 Hoje é seu dia de regar, ${nome}!`;
+          const mensagem = tipoNotif === 'vespera'
+            ? `${nome}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
+            : `Bom dia, ${nome}! Hoje (${dataStr}) é sua vez de molhar as plantas. Após regar, confirme no app! 🌱`;
 
-         const now2    = Math.floor(Date.now()/1000);
-         const header  = base64url(JSON.stringify({ alg:'RS256', typ:'JWT' }));
-         const payload = base64url(JSON.stringify({
-           iss: CLIENT_EMAIL,
-           scope: 'https://www.googleapis.com/auth/firebase.messaging',
-           aud: 'https://oauth2.googleapis.com/token',
-           exp: now2 + 3600,
-           iat: now2,
-         }));
+          console.log(`Responsável: ${nome} (${tipoNotif})`);
+          console.log(`Título: ${titulo}`);
 
-         const sign = crypto.createSign('RSA-SHA256');
-         sign.update(`${header}.${payload}`);
-         const signature = sign.sign(PRIVATE_KEY, 'base64')
-           .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+          // ── JWT para Firestore ───────────────────────────────────────────────
+          function b64url(str) {
+            return Buffer.from(str).toString('base64')
+              .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+          }
 
-         const jwt = `${header}.${payload}.${signature}`;
+          const now2    = Math.floor(Date.now()/1000);
+          const header  = b64url(JSON.stringify({ alg:'RS256', typ:'JWT' }));
+          const payload = b64url(JSON.stringify({
+            iss: CLIENT_EMAIL,
+            scope: 'https://www.googleapis.com/auth/datastore',
+            aud: 'https://oauth2.googleapis.com/token',
+            exp: now2 + 3600,
+            iat: now2,
+          }));
+          const sign = crypto.createSign('RSA-SHA256');
+          sign.update(`${header}.${payload}`);
+          const sig = sign.sign(PRIVATE_KEY,'base64')
+            .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+          const jwt = `${header}.${payload}.${sig}`;
 
-         async function getAccessToken() {
-           return new Promise((resolve, reject) => {
-             const body = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
-             const req  = https.request({
-               hostname: 'oauth2.googleapis.com',
-               path: '/token',
-               method: 'POST',
-               headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-             }, res => {
-               let d = '';
-               res.on('data', c => d += c);
-               res.on('end', () => {
-                 const parsed = JSON.parse(d);
-                 if (parsed.access_token) resolve(parsed.access_token);
-                 else reject(new Error('Token error: ' + d));
-               });
-             });
-             req.on('error', reject);
-             req.write(body);
-             req.end();
-           });
-         }
+          function httpsPost(hostname, path, headers, body) {
+            return new Promise((resolve, reject) => {
+              const req = https.request({ hostname, path, method:'POST', headers }, res => {
+                let d = '';
+                res.on('data', c => d += c);
+                res.on('end', () => resolve({ status: res.statusCode, body: d }));
+              });
+              req.on('error', reject);
+              req.write(body); req.end();
+            });
+          }
 
-         async function getTokens(accessToken) {
-           return new Promise((resolve, reject) => {
-             const req = https.request({
-               hostname: 'firestore.googleapis.com',
-               path: `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/tokens`,
-               method: 'GET',
-               headers: { 'Authorization': `Bearer ${accessToken}` }
-             }, res => {
-               let d = '';
-               res.on('data', c => d += c);
-               res.on('end', () => {
-                 try {
-                   const doc = JSON.parse(d);
-                   const fields = doc.fields || {};
-                   const tokens = Object.values(fields).map(v => v.stringValue).filter(Boolean);
-                   resolve(tokens);
-                 } catch(e) { resolve([]); }
-               });
-             });
-             req.on('error', reject);
-             req.end();
-           });
-         }
+          function httpsGet(hostname, path, headers) {
+            return new Promise((resolve, reject) => {
+              const req = https.request({ hostname, path, method:'GET', headers }, res => {
+                let d = '';
+                res.on('data', c => d += c);
+                res.on('end', () => resolve({ status: res.statusCode, body: d }));
+              });
+              req.on('error', reject);
+              req.end();
+            });
+          }
 
-         async function sendNotification(accessToken, token) {
-           return new Promise((resolve) => {
-             const body = JSON.stringify({
-               message: {
-                 token,
-                 notification: { title: titulo, body: mensagem },
-                 webpush: {
-                   notification: {
-                     title: titulo,
-                     body: mensagem,
-                     icon: 'https://heberthaugusto.github.io/rega-condominio/icon-192.png',
-                   }
-                 }
-               }
-             });
-             const req = https.request({
-               hostname: 'fcm.googleapis.com',
-               path: `/v1/projects/${PROJECT_ID}/messages:send`,
-               method: 'POST',
-               headers: {
-                 'Authorization': `Bearer ${accessToken}`,
-                 'Content-Type': 'application/json',
-                 'Content-Length': Buffer.byteLength(body),
-               }
-             }, res => {
-               let d = '';
-               res.on('data', c => d += c);
-               res.on('end', () => {
-                 console.log(`FCM response (${res.statusCode}):`, d);
-                 resolve(res.statusCode === 200);
-               });
-             });
-             req.on('error', e => { console.error('Erro:', e); resolve(false); });
-             req.write(body);
-             req.end();
-           });
-         }
+          async function getAccessToken() {
+            const body = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
+            const res  = await httpsPost('oauth2.googleapis.com', '/token',
+              { 'Content-Type': 'application/x-www-form-urlencoded' }, body);
+            const parsed = JSON.parse(res.body);
+            if (!parsed.access_token) throw new Error('Token error: ' + res.body);
+            return parsed.access_token;
+          }
 
-         (async () => {
-           try {
-             const accessToken = await getAccessToken();
-             console.log('Access token obtido!');
-             const tokens = await getTokens(accessToken);
-             console.log(`Tokens encontrados: ${tokens.length}`);
-             if (tokens.length === 0) {
-               console.log('Nenhum token registrado.');
-               process.exit(0);
-             }
-             let enviados = 0;
-             for (const token of tokens) {
-               const ok = await sendNotification(accessToken, token);
-               if (ok) enviados++;
-             }
-             console.log(`Notificações enviadas: ${enviados}/${tokens.length}`);
-           } catch(e) {
-             console.error('Erro geral:', e);
-             process.exit(1);
-           }
-         })();
-         SCRIPT
+          async function getSubscriptions(accessToken) {
+            const res = await httpsGet('firestore.googleapis.com',
+              `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/subscriptions`,
+              { 'Authorization': `Bearer ${accessToken}` });
+            try {
+              const doc    = JSON.parse(res.body);
+              const fields = doc.fields || {};
+              // Cada campo é um usuário, valor é um mapValue com endpoint e keys
+              return Object.entries(fields).map(([userId, val]) => {
+                const m = val.mapValue?.fields || {};
+                return {
+                  userId,
+                  endpoint: m.endpoint?.stringValue,
+                  keys: {
+                    p256dh: m.keys?.mapValue?.fields?.p256dh?.stringValue,
+                    auth:   m.keys?.mapValue?.fields?.auth?.stringValue,
+                  }
+                };
+              }).filter(s => s.endpoint && s.keys.p256dh && s.keys.auth);
+            } catch(e) { return []; }
+          }
+
+          (async () => {
+            try {
+              const accessToken    = await getAccessToken();
+              const subscriptions  = await getSubscriptions(accessToken);
+              console.log(`Subscriptions encontradas: ${subscriptions.length}`);
+
+              if (subscriptions.length === 0) {
+                console.log('Nenhuma subscription registrada.');
+                process.exit(0);
+              }
+
+              const payload = JSON.stringify({ title: titulo, body: mensagem });
+              let enviados  = 0;
+
+              for (const sub of subscriptions) {
+                try {
+                  await webpush.sendNotification(
+                    { endpoint: sub.endpoint, keys: sub.keys },
+                    payload
+                  );
+                  console.log(`✅ Notificação enviada para ${sub.userId}`);
+                  enviados++;
+                } catch(e) {
+                  console.error(`❌ Erro para ${sub.userId}:`, e.statusCode || e.message);
+                  // Subscription expirada (410) — poderia remover do Firestore aqui
+                }
+              }
+              console.log(`Notificações enviadas: ${enviados}/${subscriptions.length}`);
+            } catch(e) {
+              console.error('Erro geral:', e);
+              process.exit(1);
+            }
+          })();
+          SCRIPT
