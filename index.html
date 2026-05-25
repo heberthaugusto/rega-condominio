@@ -562,10 +562,18 @@ function buildSchedule(fromDate, toDate) {
   function nextValid(candidate) {
     let d = cloneD(candidate);
     for (let guard = 0; guard < 60; guard++) {
-      const key = toKey(d);
+      const key   = toKey(d);
+      const prev1 = toKey(addDays(d, -1)); // ontem
+      const prev2 = toKey(addDays(d, -2)); // anteontem
 
-      // 1. Chuva: pula 2 dias sem molhar → 3º dia após a chuva
-      if (rainDays[key]) { d = addDays(d, 3); continue; }
+      // Regra chuva = mesma regra do Grupo A:
+      // chuva conta como dia regado → 2 dias de folga → próximo = chuva+3
+      // 1a. Candidato é o dia da chuva → vai para chuva+3
+      if (rainDays[key])   { d = addDays(d, 3); continue; }
+      // 1b. Candidato é chuva+1 (1º dia de folga) → vai para chuva+3 (= d+2)
+      if (rainDays[prev1]) { d = addDays(d, 2); continue; }
+      // 1c. Candidato é chuva+2 (2º dia de folga) → vai para chuva+3 (= d+1)
+      if (rainDays[prev2]) { d = addDays(d, 1); continue; }
 
       // 2. Próprio domingo da Karina → domingo+3 (quarta)
       if (karinaSundays.has(key)) { d = addDays(d, 3); continue; }
