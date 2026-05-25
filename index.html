@@ -523,32 +523,46 @@ function buildSchedule(fromDate, toDate) {
   }
 
   // ── Grupo A ───────────────────────────────────────────────────────────────
-  // Resolve um candidato para o próximo slot válido, aplicando as regras de
-  // desvio em loop até não haver mais conflito.
+  // Resolve um candidato para o próximo slot válido aplicando todas as regras
+  // em loop até não haver mais conflito.
   //
-  // Prioridade:
-  //   1. É o próprio domingo da Karina → vai para domingo+3
-  //   2. É véspera (sábado) de um domingo da Karina → vai para domingo+3
-  //   3. Qualquer outro domingo → avança 1
+  // Prioridade (verificada nesta ordem):
+  //   1. CHUVA: candidato caiu num dia de chuva → 3º dia após a chuva (+3)
+  //   2. KARINA — próprio domingo → domingo+3 (quarta-feira)
+  //   3. KARINA — véspera (sábado antes) → domingo+3 (quarta-feira)
+  //   4. KARINA — segunda ou terça imediatamente após o domingo → quarta (domingo+3)
+  //   5. Qualquer outro domingo → +1
+
+  function isPostKarina(d) {
+    const dow = d.getDay();
+    if (dow !== 1 && dow !== 2) return false; // só seg (1) e ter (2)
+    const lastSunKey = toKey(addDays(d, -dow));
+    return karinaSundays.has(lastSunKey);
+  }
+
+  function karinaBaseSun(d) {
+    // retorna o domingo da Karina que antecede d (d é seg ou ter após Karina)
+    return addDays(d, -d.getDay());
+  }
+
   function nextValid(candidate) {
     let d = cloneD(candidate);
     for (let guard = 0; guard < 60; guard++) {
       const key = toKey(d);
 
-      // 1. É o próprio domingo da Karina → pula para Karina+3
-      if (karinaSundays.has(key)) {
-        d = addDays(d, 3);
-        continue;
-      }
+      // 1. Chuva: pula 2 dias sem molhar → 3º dia após a chuva
+      if (rainDays[key]) { d = addDays(d, 3); continue; }
 
-      // 2. É véspera de um domingo da Karina → pula para Karina+3
-      const tomorrowKey = toKey(addDays(d, 1));
-      if (karinaSundays.has(tomorrowKey)) {
-        d = addDays(d, 1 + 3); // passa o domingo (+1) e vai mais 3
-        continue;
-      }
+      // 2. Próprio domingo da Karina → domingo+3 (quarta)
+      if (karinaSundays.has(key)) { d = addDays(d, 3); continue; }
 
-      // 3. Qualquer outro domingo
+      // 3. Véspera (sábado) de domingo da Karina → domingo+3 (quarta)
+      if (karinaSundays.has(toKey(addDays(d, 1)))) { d = addDays(d, 4); continue; }
+
+      // 4. Segunda ou terça imediatamente após domingo da Karina → quarta (domingo+3)
+      if (isPostKarina(d)) { d = addDays(karinaBaseSun(d), 3); continue; }
+
+      // 5. Qualquer outro domingo
       if (isSun(d)) { d = addDays(d, 1); continue; }
 
       return d;
@@ -560,18 +574,11 @@ function buildSchedule(fromDate, toDate) {
   let idx = 0;
 
   while (cur <= toDate) {
+    // nextValid já aplica todas as regras: chuva, Karina (domingo/véspera/seg-ter), domingo comum
     cur = nextValid(cur);
     if (cur > toDate) break;
 
-    const curKey  = toKey(cur);
-    const prevKey = toKey(addDays(cur, -1));
-
-    // Regra de chuva: chuva em hoje ou ontem → avança 1 e tenta novamente
-    // (slot não é consumido)
-    if (rainDays[curKey] || rainDays[prevKey]) {
-      cur = addDays(cur, 1);
-      continue;
-    }
+    const curKey = toKey(cur);
 
     // Registra o responsável
     if (cur >= fromDate) {
