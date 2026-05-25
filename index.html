@@ -735,15 +735,22 @@ async function completePushSubscription() {
     if (currentUser) {
       console.log('[Push] Salvando no Firestore para', currentUser.id, '...');
       const subJson = sub.toJSON();
+
+      // Gera um ID único por dispositivo baseado no endpoint
+      // Assim a mesma pessoa pode ter Android + iOS registrados simultaneamente
+      const deviceId = btoa(subJson.endpoint).slice(-20).replace(/[^a-zA-Z0-9]/g, '_');
+      const fieldKey = currentUser.id + '_' + deviceId;
+
       await setDoc(doc(db, 'rega', 'subscriptions'), {
-        [currentUser.id]: {
+        [fieldKey]: {
           endpoint: subJson.endpoint,
           keys: subJson.keys,
           userId: currentUser.id,
+          deviceId: deviceId,
           updatedAt: new Date().toISOString(),
         }
       }, { merge: true });
-      console.log('[Push] ✅ Subscription salva no Firestore para', currentUser.id);
+      console.log('[Push] ✅ Subscription salva no Firestore:', fieldKey);
       showToast('✅ Alertas vinculados a ' + currentUser.name + '!');
     } else {
       console.warn('[Push] currentUser é null — subscription não salva');
