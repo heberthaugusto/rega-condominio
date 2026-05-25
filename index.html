@@ -716,15 +716,24 @@ async function initPush() {
 // Completa a subscription sem pedir permissão (já concedida anteriormente)
 async function completePushSubscription() {
   try {
+    console.log('[Push] Iniciando completePushSubscription...');
     const reg = await waitForActiveSW();
-    let sub   = await reg.pushManager.getSubscription();
+    console.log('[Push] SW ativo:', !!reg);
+
+    let sub = await reg.pushManager.getSubscription();
+    console.log('[Push] Subscription existente:', !!sub);
+
     if (!sub) {
+      console.log('[Push] Criando nova subscription...');
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
+      console.log('[Push] Subscription criada:', sub.endpoint.slice(0,50) + '...');
     }
+
     if (currentUser) {
+      console.log('[Push] Salvando no Firestore para', currentUser.id, '...');
       const subJson = sub.toJSON();
       await setDoc(doc(db, 'rega', 'subscriptions'), {
         [currentUser.id]: {
@@ -734,11 +743,15 @@ async function completePushSubscription() {
           updatedAt: new Date().toISOString(),
         }
       }, { merge: true });
-      console.log('[Push] Subscription salva para', currentUser.id);
+      console.log('[Push] ✅ Subscription salva no Firestore para', currentUser.id);
+      showToast('✅ Alertas vinculados a ' + currentUser.name + '!');
+    } else {
+      console.warn('[Push] currentUser é null — subscription não salva');
     }
     checkNotifButton();
   } catch(e) {
-    console.error('[Push] Erro ao completar subscription:', e.name, e.message);
+    console.error('[Push] Erro em completePushSubscription:', e.name, e.message);
+    showToast('❌ Erro ao salvar alerta: ' + (e.message || e.name));
   }
 }
 
@@ -1195,7 +1208,7 @@ function showToast(msg) {
 // ═══════════════════════════════════════════════════════
 // ATUALIZAÇÃO AUTOMÁTICA (Service Worker + versão)
 // ═══════════════════════════════════════════════════════
-const APP_VERSION = '1.0.0'; // ← incrementar a cada deploy
+const APP_VERSION = '1.3.0'; // ← incrementar a cada deploy
 
 function checkForUpdate() {
   if (!('serviceWorker' in navigator)) return;
