@@ -270,7 +270,7 @@
           </div>
         </div>
         <div class="header-right">
-          <button class="notif-btn" id="notif-btn" style="display:none" onclick="requestNotif()">🔔 Ativar alertas</button>
+          <button class="notif-btn" id="notif-btn" style="display:none">🔔 Ativar alertas</button>
           <div class="user-header" onclick="logout()">
             <div class="avatar" id="header-avatar" style="width:34px;height:34px;font-size:14px"></div>
             <div>
@@ -662,29 +662,54 @@ async function initPush() {
   }
 
   try {
-    // 1. Pede permissão — deve ser chamado direto de um gesto do usuário
+    // ── ETAPA 1: pedir permissão ──────────────────────────────────────────
+    // CRÍTICO para iOS: Notification.requestPermission() deve ser a PRIMEIRA
+    // chamada async após o gesto do usuário, sem nenhum await anterior.
+    // Qualquer await antes quebra a "user gesture chain" e gera
+    // "missing or insufficient permission".
     const permission = await Notification.requestPermission();
+
     if (permission !== 'granted') {
       if (permission === 'denied') {
-        showToast('🔕 Notificações bloqueadas. Habilite nas configurações do navegador.');
+        showToast('🔕 Bloqueado. Vá em Ajustes → Safari → Notificações para habilitar.');
+      } else {
+        showToast('⚠️ Permissão não concedida.');
       }
       checkNotifButton();
       return;
     }
 
-    // 2. Aguarda SW ativo (resolve condição de corrida no iOS)
-    const reg = await waitForActiveSW();
+    // ── ETAPA 2: completa subscription (SW + Firestore) ─────────────────
+    // Separado do requestPermission para respeitar o requisito do iOS
+    // de não criar subscription na mesma chamada que pediu permissão
+    await completePushSubscription();
+    showToast('🔔 Alertas ativados com sucesso!');
 
-    // 3. Obtém ou cria subscription
-    let sub = await reg.pushManager.getSubscription();
+  } catch(e) {
+    console.error('[Push] Erro:', e.name, e.message);
+    if (e.name === 'NotAllowedError') {
+      showToast('🔕 Permissão negada. Verifique as configurações do app.');
+    } else if (e.name === 'InvalidStateError') {
+      showToast('⚠️ Feche e reabra o app pelo ícone e tente novamente.');
+    } else if (e.message?.toLowerCase().includes('permission')) {
+      showToast('⚠️ iOS: feche o app, reabra pelo ícone da tela inicial e tente novamente.');
+    } else {
+      showToast('❌ Erro: ' + (e.message || e.name));
+    }
+  }
+}
+
+// Completa a subscription sem pedir permissão (já concedida anteriormente)
+async function completePushSubscription() {
+  try {
+    const reg = await waitForActiveSW();
+    let sub   = await reg.pushManager.getSubscription();
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
     }
-
-    // 4. Salva subscription no Firestore
     if (currentUser) {
       const subJson = sub.toJSON();
       await setDoc(doc(db, 'rega', 'subscriptions'), {
@@ -695,20 +720,11 @@ async function initPush() {
           updatedAt: new Date().toISOString(),
         }
       }, { merge: true });
+      console.log('[Push] Subscription salva para', currentUser.id);
     }
-
     checkNotifButton();
-    showToast('🔔 Alertas ativados com sucesso!');
   } catch(e) {
-    console.error('[Push] Erro:', e.name, e.message);
-    // Mensagens de erro específicas
-    if (e.name === 'NotAllowedError') {
-      showToast('🔕 Permissão negada. Verifique as configurações do navegador.');
-    } else if (e.name === 'InvalidStateError') {
-      showToast('⚠️ Recarregue o app e tente novamente.');
-    } else {
-      showToast('❌ Erro ao ativar alertas: ' + e.message);
-    }
+    console.error('[Push] Erro ao completar subscription:', e.name, e.message);
   }
 }
 
@@ -816,13 +832,13 @@ function showApp() {
   nameEl.textContent = u.name;
   nameEl.style.color = u.color;
 
-  // Aguarda o SW registrar antes de verificar suporte a push
-  // (evita botão sumindo no Android por PushManager ainda não disponível)
+  // Aguarda SW pronto, verifica botão e completa subscription se permissão já concedida
   navigator.serviceWorker.ready.then(() => {
     checkNotifButton();
-    // Auto-solicita permissão apenas em Android/desktop (iOS requer gesto manual)
-    if (isPushSupported() && !isIOS() && Notification.permission === 'default') {
-      setTimeout(() => initPush(), 800);
+    // Se o usuário já concedeu permissão na tela inicial (antes do login),
+    // completa a subscription agora que sabemos qual usuário está logado
+    if (isPushSupported() && Notification.permission === 'granted') {
+      completePushSubscription();
     }
   }).catch(() => checkNotifButton());
   renderNextDay();
@@ -1228,6 +1244,30 @@ async function init() {
     if (e.key === 'Enter') doLogin();
   });
   document.getElementById('login-btn').addEventListener('click', doLogin);
+
+  // Botão de notificação via addEventListener
+  const notifBtn = document.getElementById('notif-btn');
+  if (notifBtn) {
+    notifBtn.addEventListener('click', () => { initPush(); });
+  }
+
+  // ── Pedido de permissão antecipado ──────────────────────────────────────
+  // Pede permissão de notificação logo ao abrir o app, antes do login.
+  // Estratégia necessária para iOS: o sistema exige que requestPermission()
+  // seja chamado o mais próximo possível do carregamento inicial da página,
+  // direto de um gesto ou logo no init, sem operações async intermediárias.
+  // A subscription (vinculação ao usuário) é feita depois, no showApp().
+  if (isPushSupported() && Notification.permission === 'default') {
+    if (isIOS() && !isStandalone()) {
+      // iOS sem PWA: não pede, mostra instrução se tocar no botão
+    } else {
+      // Pede permissão imediatamente — sem await para não bloquear o init
+      Notification.requestPermission().then(permission => {
+        console.log('[Push] Permissão antecipada:', permission);
+        checkNotifButton();
+      });
+    }
+  }
 
   // Carrega dados
   await loadAll();
