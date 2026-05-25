@@ -47,13 +47,26 @@ jobs:
            kd = addDays(kd, 14);
          }
 
-         function nextValid(candidate) {
+         // Verifica se d é segunda ou terça imediatamente após um domingo da Karina
+         function isPostKarina(d) {
+           const dow = d.getDay();
+           if (dow !== 1 && dow !== 2) return false;
+           return karinaSundays.has(toKey(addDays(d, -dow)));
+         }
+
+         function nextValid(candidate, rainDays) {
            let d = new Date(candidate);
            for (let g = 0; g < 60; g++) {
              const key = toKey(d);
+             // 1. Chuva: pula 2 dias sem molhar → 3º dia após a chuva
+             if (rainDays && rainDays[key]) { d = addDays(d, 3); continue; }
+             // 2. Próprio domingo da Karina → domingo+3 (quarta)
              if (karinaSundays.has(key)) { d = addDays(d, 3); continue; }
-             const tomorrowKey = toKey(addDays(d, 1));
-             if (karinaSundays.has(tomorrowKey)) { d = addDays(d, 4); continue; }
+             // 3. Véspera (sábado) de domingo da Karina → domingo+3 (quarta)
+             if (karinaSundays.has(toKey(addDays(d, 1)))) { d = addDays(d, 4); continue; }
+             // 4. Segunda ou terça imediatamente após domingo da Karina → quarta (domingo+3)
+             if (isPostKarina(d)) { d = addDays(addDays(d, -d.getDay()), 3); continue; }
+             // 5. Qualquer outro domingo
              if (isSun(d)) { d = addDays(d, 1); continue; }
              return d;
            }
@@ -65,9 +78,8 @@ jobs:
            let cur = new Date(START_A);
            let idx = 0;
            while (cur <= addDays(targetDate, 1)) {
-             cur = nextValid(cur);
-             const curKey  = toKey(cur);
-             const prevKey = toKey(addDays(cur, -1));
+             cur = nextValid(cur, null); // notificação não considera chuva (sem acesso ao Firestore aqui)
+             const curKey = toKey(cur);
              if (curKey === target) return GROUP_A[idx % GROUP_A.length];
              idx++;
              cur = addDays(cur, 3);
