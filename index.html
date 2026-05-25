@@ -562,9 +562,7 @@ function buildSchedule(fromDate, toDate) {
       // 4. Segunda ou terça imediatamente após domingo da Karina → quarta (domingo+3)
       if (isPostKarina(d)) { d = addDays(karinaBaseSun(d), 3); continue; }
 
-      // 5. Qualquer outro domingo
-      if (isSun(d)) { d = addDays(d, 1); continue; }
-
+      // Grupo A pode regar em qualquer domingo comum (só domingos da Karina são bloqueados)
       return d;
     }
     return d;
