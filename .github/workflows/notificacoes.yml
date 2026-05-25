@@ -192,11 +192,12 @@ jobs:
             try {
               const doc    = JSON.parse(res.body);
               const fields = doc.fields || {};
-              // Cada campo é um usuário, valor é um mapValue com endpoint e keys
-              return Object.entries(fields).map(([userId, val]) => {
+              // Cada campo é userId_deviceId — suporta múltiplos dispositivos por usuário
+              return Object.entries(fields).map(([fieldKey, val]) => {
                 const m = val.mapValue?.fields || {};
                 return {
-                  userId,
+                  fieldKey,
+                  userId:   m.userId?.stringValue || fieldKey.split('_')[0],
                   endpoint: m.endpoint?.stringValue,
                   keys: {
                     p256dh: m.keys?.mapValue?.fields?.p256dh?.stringValue,
