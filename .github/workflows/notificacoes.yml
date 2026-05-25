@@ -69,7 +69,14 @@ jobs:
           function nextValid(candidate) {
             let d = new Date(candidate);
             for (let g = 0; g < 60; g++) {
-              const key = toKey(d);
+              const key   = toKey(d);
+              const prev1 = toKey(addDays(d, -1));
+              const prev2 = toKey(addDays(d, -2));
+              // Regra chuva: chuva+3 (igual Grupo A)
+              if (rainDays && rainDays[key])   { d = addDays(d, 3); continue; }
+              if (rainDays && rainDays[prev1]) { d = addDays(d, 2); continue; }
+              if (rainDays && rainDays[prev2]) { d = addDays(d, 1); continue; }
+              // Karina
               if (karinaSundays.has(key)) { d = addDays(d, 3); continue; }
               const tomorrowKey = toKey(addDays(d, 1));
               if (karinaSundays.has(tomorrowKey)) { d = addDays(d, 4); continue; }
