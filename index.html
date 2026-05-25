@@ -337,7 +337,7 @@
 // ═══════════════════════════════════════════════════════
 import { initializeApp }                                          from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js';
 import { getFirestore, doc, getDoc, setDoc, onSnapshot }         from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js';
-import { getMessaging, getToken, onMessage }                      from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js';
+// firebase-messaging não é suportado no Safari/iOS — importado de forma lazy apenas quando necessário
 
 const firebaseConfig = {
   apiKey: "AIzaSyA3HU10fU1DA6NMzut1d90HPAzax5VQckM",
@@ -354,7 +354,6 @@ const db   = getFirestore(_app);
 // Expõe instâncias globalmente
 window.db = db;
 window.__firebase_app_instance = _app;
-window.__firebase_messaging = { getMessaging, getToken, onMessage };
 
 // ═══════════════════════════════════════════════════════
 // CONFIGURAÇÃO
@@ -581,29 +580,40 @@ function getResponsible(dateKey, sched) {
 const VAPID_PUBLIC_KEY = 'BEjryTDOPo54EXqG7Tttt4Y6TrEtrXFvLAK137KEH6k6xtYJMBlGNPnnCcEhmhzUYxA3dyKrDDSPBM5ZkK1NFZA';
 
 async function initFCM() {
+  // Safari/iOS não suporta FCM Web Push — detecta e sai silenciosamente
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const isIOS    = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isSafari || isIOS) {
+    console.log('[FCM] Safari/iOS detectado — notificações push não suportadas');
+    const btn = document.getElementById('notif-btn');
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+
   try {
-    const { getMessaging, getToken, onMessage } = window.__firebase_messaging;
+    // Import lazy — só carrega o módulo se não for Safari/iOS
+    const { getMessaging, getToken, onMessage } =
+      await import('https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js');
+
     const messaging = getMessaging(window.__firebase_app_instance);
 
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
       console.log('[FCM] Permissão negada');
       checkNotifButton();
-  if (Notification.permission === 'default') setTimeout(() => initFCM(), 500);
+      if (Notification.permission === 'default') setTimeout(() => initFCM(), 500);
       return;
     }
 
     const token = await getToken(messaging, { vapidKey: VAPID_PUBLIC_KEY });
     if (token) {
       console.log('[FCM] Token:', token);
-      // Salva token no Firestore vinculado ao usuário logado
       if (currentUser) {
-        await _setDoc(_doc(db, 'rega', 'tokens'), { [currentUser.id]: token }, { merge: true });
+        await setDoc(doc(db, 'rega', 'tokens'), { [currentUser.id]: token }, { merge: true });
         console.log('[FCM] Token salvo para', currentUser.id);
       }
     }
 
-    // Exibe notificação quando app está aberto
     onMessage(messaging, (payload) => {
       showToast('🔔 ' + (payload.notification?.title || 'Nova notificação'));
     });
@@ -620,7 +630,11 @@ async function requestNotif() {
 
 function checkNotifButton() {
   const btn = document.getElementById('notif-btn');
-  if (btn) btn.style.display = Notification.permission === 'granted' ? 'none' : 'flex';
+  if (!btn) return;
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const isIOS    = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (isSafari || isIOS) { btn.style.display = 'none'; return; }
+  btn.style.display = (typeof Notification !== 'undefined' && Notification.permission === 'granted') ? 'none' : 'flex';
 }
 
 // ═══════════════════════════════════════════════════════
@@ -706,8 +720,10 @@ function showApp() {
   nameEl.style.color = u.color;
 
   checkNotifButton();
-  // Solicita permissão FCM automaticamente se ainda não concedida
-  if (Notification.permission === 'default') {
+  // Solicita permissão FCM apenas em browsers que suportam (não Safari/iOS)
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const isIOS    = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+  if (!isSafari && !isIOS && typeof Notification !== 'undefined' && Notification.permission === 'default') {
     setTimeout(() => initFCM(), 500);
   }
   renderNextDay();
@@ -1145,7 +1161,8 @@ window.removeRain     = removeRain;
 window.doUpdate       = doUpdate;
 window.dismissUpdate  = dismissUpdate;
 
-await init();
+// Compatível com Safari: não usar top-level await
+init().catch(e => console.error('[App] Erro na inicialização:', e));
 
 
 </script>
