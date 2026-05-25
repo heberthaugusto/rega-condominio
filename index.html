@@ -367,9 +367,11 @@ const USERS = [
   { id: 'karina',  name: 'Karina',  password: 'kmd2026',   color: '#fbbf24' },
 ];
 
-const GROUP_A = ['heberth', 'simone', 'flavio', 'bruno', 'luciano'];
-const START_A  = new Date(2026, 4, 19); // 19/05/2026
-const START_K  = new Date(2026, 4, 17); // 17/05/2026
+// Grupo A: âncora = Simone em 21/05/2026
+// GROUP_A começa em Simone; idx 0=simone, 1=flávio, 2=bruno, 3=luciano, 4=heberth, depois repete
+const GROUP_A  = ['simone', 'flavio', 'bruno', 'luciano', 'heberth'];
+const START_A  = new Date(2026, 4, 21); // 21/05/2026 — âncora: Simone
+const START_K  = new Date(2026, 4, 17); // 17/05/2026 — Karina: domingo sim/não (17→31→14/06…)
 
 // ═══════════════════════════════════════════════════════
 // UTILITÁRIOS DE DATA
@@ -488,10 +490,28 @@ function showSyncToast() {
 // ALGORITMO DE CALENDÁRIO
 // ═══════════════════════════════════════════════════════
 // Retorna objeto { 'YYYY-MM-DD': { groupA?: userId, karina?: true } }
+//
+// REGRAS DO GRUPO A (a partir de 21/05/2026, âncora = Simone):
+//   • Molha 1 dia, folga 2 dias → próximo = cur + 3
+//   • Nunca em domingo
+//   • Regra Karina: se o candidato calculado cair no dia ANTERIOR a um domingo
+//     da Karina (véspera = sábado), NÃO marca esse dia e reposiciona o
+//     candidato para o 3º dia após o domingo da Karina.
+//     Ex: Karina = dom 31/05 → candidato em 30/05 (sáb) → move para 03/06 (ter)
+//
+// Karina: domingos alternados a partir de START_K, independente do Grupo A.
 function buildSchedule(fromDate, toDate) {
   const sched = {};
 
-  // Karina: domingos alternados a partir de START_K
+  // ── Monta set de domingos da Karina ──────────────────────────────────────
+  const karinaSundays = new Set();
+  let ktmp = cloneD(START_K);
+  while (ktmp <= addDays(toDate, 14)) {
+    karinaSundays.add(toKey(ktmp));
+    ktmp = addDays(ktmp, 14);
+  }
+
+  // ── Karina: registra no schedule ─────────────────────────────────────────
   let kd = cloneD(START_K);
   while (kd <= toDate) {
     if (kd >= fromDate) {
@@ -502,37 +522,54 @@ function buildSchedule(fromDate, toDate) {
     kd = addDays(kd, 14);
   }
 
-  // Grupo A: dia sim dia não, sem domingos
-  // Regra da chuva: chuva no dia X dispensa X e X+1.
-  // O próximo responsável rega em X+2 (ou X+3 se X+2 for domingo).
-  // O intervalo de 2 dias é sempre contado a partir do ÚLTIMO DIA REGADO.
-  // Regra Karina: se o candidato for segunda-feira logo após um domingo da Karina,
-  // avança para terça-feira para não regar dois dias seguidos.
+  // ── Grupo A ───────────────────────────────────────────────────────────────
+  // Resolve um candidato para o próximo slot válido, aplicando as regras de
+  // desvio em loop até não haver mais conflito.
+  //
+  // Prioridade:
+  //   1. É o próprio domingo da Karina → vai para domingo+3
+  //   2. É véspera (sábado) de um domingo da Karina → vai para domingo+3
+  //   3. Qualquer outro domingo → avança 1
+  function nextValid(candidate) {
+    let d = cloneD(candidate);
+    for (let guard = 0; guard < 60; guard++) {
+      const key = toKey(d);
+
+      // 1. É o próprio domingo da Karina → pula para Karina+3
+      if (karinaSundays.has(key)) {
+        d = addDays(d, 3);
+        continue;
+      }
+
+      // 2. É véspera de um domingo da Karina → pula para Karina+3
+      const tomorrowKey = toKey(addDays(d, 1));
+      if (karinaSundays.has(tomorrowKey)) {
+        d = addDays(d, 1 + 3); // passa o domingo (+1) e vai mais 3
+        continue;
+      }
+
+      // 3. Qualquer outro domingo
+      if (isSun(d)) { d = addDays(d, 1); continue; }
+
+      return d;
+    }
+    return d;
+  }
+
   let cur = cloneD(START_A);
   let idx = 0;
 
-  // Monta set de domingos da Karina para consulta rápida
-  const karinaSundays = new Set();
-  let ktmp = cloneD(START_K);
-  while (ktmp <= toDate) { karinaSundays.add(toKey(ktmp)); ktmp = addDays(ktmp, 14); }
-
   while (cur <= toDate) {
-    // Pula domingo
-    if (isSun(cur)) { cur = addDays(cur, 1); continue; }
+    cur = nextValid(cur);
+    if (cur > toDate) break;
 
     const curKey  = toKey(cur);
     const prevKey = toKey(addDays(cur, -1));
 
-    // Se este dia é dia de chuva ou dia seguinte à chuva, não atribui ninguém
-    // e avança 1 dia para tentar o próximo
+    // Regra de chuva: chuva em hoje ou ontem → avança 1 e tenta novamente
+    // (slot não é consumido)
     if (rainDays[curKey] || rainDays[prevKey]) {
       cur = addDays(cur, 1);
-      continue;
-    }
-
-    // Regra Karina: se for segunda-feira e o domingo anterior foi da Karina, pula para terça
-    if (cur.getDay() === 1 && karinaSundays.has(prevKey)) {
-      cur = addDays(cur, 1); // avança para terça
       continue;
     }
 
@@ -544,15 +581,8 @@ function buildSchedule(fromDate, toDate) {
 
     idx++;
 
-    // Próximo candidato: +2 dias a partir deste dia regado
-    let next = addDays(cur, 2);
-    if (isSun(next)) next = addDays(next, 1);
-    // Verifica se o próximo também cai em segunda após domingo da Karina
-    const nextPrevKey = toKey(addDays(next, -1));
-    if (next.getDay() === 1 && karinaSundays.has(nextPrevKey)) {
-      next = addDays(next, 1); // avança para terça
-    }
-    cur = next;
+    // Próximo candidato: molha 1, folga 2 → +3 dias
+    cur = addDays(cur, 3);
   }
 
   return sched;
@@ -562,7 +592,7 @@ function getScheduleFor(d) {
   const from = new Date(d.getFullYear(), d.getMonth(), 1);
   const to   = new Date(d.getFullYear(), d.getMonth()+1, 0);
   // Precisamos de um range maior para calcular corretamente a partir do início
-  const bigFrom = new Date(2026, 4, 1);
+  const bigFrom = new Date(2026, 4, 17); // começa com START_K para incluir Karina desde o início
   return buildSchedule(bigFrom, to);
 }
 
