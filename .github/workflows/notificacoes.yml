@@ -226,23 +226,31 @@ jobs:
                 process.exit(0);
               }
 
+              // Filtra apenas os dispositivos do responsável do dia
+              const subsFiltradas = subscriptions.filter(s => s.userId === responsavel);
+              console.log(`Dispositivos de ${nome}: ${subsFiltradas.length}/${subscriptions.length} total`);
+
+              if (subsFiltradas.length === 0) {
+                console.log(`Nenhum dispositivo registrado para ${nome}.`);
+                process.exit(0);
+              }
+
               const payload = JSON.stringify({ title: titulo, body: mensagem });
               let enviados  = 0;
 
-              for (const sub of subscriptions) {
+              for (const sub of subsFiltradas) {
                 try {
                   await webpush.sendNotification(
                     { endpoint: sub.endpoint, keys: sub.keys },
                     payload
                   );
-                  console.log(`✅ Notificação enviada para ${sub.userId}`);
+                  console.log(`✅ Notificação enviada para ${sub.userId} (${sub.fieldKey})`);
                   enviados++;
                 } catch(e) {
                   console.error(`❌ Erro para ${sub.userId}:`, e.statusCode || e.message);
-                  // Subscription expirada (410) — poderia remover do Firestore aqui
                 }
               }
-              console.log(`Notificações enviadas: ${enviados}/${subscriptions.length}`);
+              console.log(`Notificações enviadas: ${enviados}/${subsFiltradas.length}`);
             } catch(e) {
               console.error('Erro geral:', e);
               process.exit(1);
