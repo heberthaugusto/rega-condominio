@@ -207,6 +207,16 @@
       font-size: 14px; width: 100%;
     }
 
+    /* BOTÃO DE NOTIFICAÇÃO NA TELA DE LOGIN */
+    .notif-login-btn {
+      margin-top: 16px; padding: 12px 24px; border-radius: 12px;
+      border: 1px solid #4ade8044; background: #162016;
+      color: #4ade80; font-size: 14px; font-weight: 700;
+      font-family: 'DM Sans', sans-serif; cursor: pointer;
+      transition: background 0.15s;
+    }
+    .notif-login-btn:active { background: #1e3a1e; }
+
     /* TOAST */
     .toast {
       position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
@@ -256,6 +266,10 @@
       <div class="login-error" id="login-error" style="display:none">Senha incorreta</div>
       <button class="login-btn" id="login-btn">Entrar</button>
     </div>
+    <!-- Botão de notificação na tela de login — visível antes do login, ativado por gesto -->
+    <button class="notif-login-btn" id="notif-login-btn" style="display:none">
+      🔔 Ativar alertas de rega
+    </button>
   </div>
 
   <!-- MAIN APP -->
@@ -733,21 +747,22 @@ async function requestNotif() {
 }
 
 function checkNotifButton() {
+  const granted  = isPushSupported() && Notification.permission === 'granted';
+  const iosNoApp = isIOS() && !isStandalone();
+
+  // Botão no header (pós-login)
   const btn = document.getElementById('notif-btn');
-  if (!btn) return;
-
-  // iOS sem PWA: mostra botão para exibir instrução de instalação
-  if (isIOS() && !isStandalone()) {
-    btn.style.display = 'flex';
-    return;
+  if (btn) {
+    if (!isPushSupported() && !iosNoApp) { btn.style.display = 'none'; }
+    else if (granted)                    { btn.style.display = 'none'; }
+    else                                 { btn.style.display = 'flex'; }
   }
 
-  if (!isPushSupported()) {
-    btn.style.display = 'none';
-    return;
+  // Botão na tela de login (pré-login) — esconde após permissão concedida
+  const loginBtn = document.getElementById('notif-login-btn');
+  if (loginBtn) {
+    loginBtn.style.display = (granted || iosNoApp || !isPushSupported()) ? 'none' : 'block';
   }
-
-  btn.style.display = Notification.permission === 'granted' ? 'none' : 'flex';
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1245,28 +1260,23 @@ async function init() {
   });
   document.getElementById('login-btn').addEventListener('click', doLogin);
 
-  // Botão de notificação via addEventListener
+  // ── Botão no header (pós-login) ─────────────────────────────────────────
   const notifBtn = document.getElementById('notif-btn');
-  if (notifBtn) {
-    notifBtn.addEventListener('click', () => { initPush(); });
-  }
+  if (notifBtn) notifBtn.addEventListener('click', () => initPush());
 
-  // ── Pedido de permissão antecipado ──────────────────────────────────────
-  // Pede permissão de notificação logo ao abrir o app, antes do login.
-  // Estratégia necessária para iOS: o sistema exige que requestPermission()
-  // seja chamado o mais próximo possível do carregamento inicial da página,
-  // direto de um gesto ou logo no init, sem operações async intermediárias.
-  // A subscription (vinculação ao usuário) é feita depois, no showApp().
-  if (isPushSupported() && Notification.permission === 'default') {
-    if (isIOS() && !isStandalone()) {
-      // iOS sem PWA: não pede, mostra instrução se tocar no botão
-    } else {
-      // Pede permissão imediatamente — sem await para não bloquear o init
-      Notification.requestPermission().then(permission => {
-        console.log('[Push] Permissão antecipada:', permission);
-        checkNotifButton();
-      });
-    }
+  // ── Botão na tela de login (pré-login) ───────────────────────────────────
+  // Android Chrome exige gesto do usuário para requestPermission().
+  // Chamá-lo sem gesto no init() é silenciosamente ignorado.
+  // Solução: botão visível antes do login que o usuário toca explicitamente.
+  const notifLoginBtn = document.getElementById('notif-login-btn');
+  if (notifLoginBtn) {
+    notifLoginBtn.addEventListener('click', () => initPush());
+    // Mostra o botão apenas se ainda não foi decidido
+    navigator.serviceWorker.ready.then(() => {
+      const show = isPushSupported() && Notification.permission === 'default' &&
+                   !(isIOS() && !isStandalone());
+      notifLoginBtn.style.display = show ? 'block' : 'none';
+    }).catch(() => {});
   }
 
   // Carrega dados
