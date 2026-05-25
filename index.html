@@ -615,17 +615,14 @@ function getResponsible(dateKey, sched) {
 // ═══════════════════════════════════════════════════════
 const VAPID_PUBLIC_KEY = 'BJNUDISSu-_hn1c8VxcsV9I_8oePTVeiMoyFvetvxFeY3LQeNVAfxrBv3Gk7KzaSj_4Bo_H6BaNj8tAX57c9-ec';
 
-// Detecta se o ambiente suporta Web Push
 function isPushSupported() {
   return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 }
 
-// Detecta iOS para mostrar aviso de instalação se necessário
 function isIOS() {
   return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 }
 
-// Verifica se está rodando como PWA instalado (standalone)
 function isStandalone() {
   return window.matchMedia('(display-mode: standalone)').matches ||
          window.navigator.standalone === true;
@@ -638,31 +635,48 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
+// Aguarda o SW estar completamente ativo e controlando a página
+// Resolve condição de corrida crítica no iOS
+async function waitForActiveSW() {
+  const reg = await navigator.serviceWorker.ready;
+  // Se já há um controller ativo, resolve imediatamente
+  if (navigator.serviceWorker.controller) return reg;
+  // Caso contrário aguarda o controllerchange (SW novo assumindo)
+  return new Promise(resolve => {
+    navigator.serviceWorker.addEventListener('controllerchange', () => resolve(reg), { once: true });
+    // Fallback: resolve após 3s mesmo sem controller (evita trava)
+    setTimeout(() => resolve(reg), 3000);
+  });
+}
+
 async function initPush() {
-  if (!isPushSupported()) {
-    console.log('[Push] Web Push não suportado neste browser');
-    checkNotifButton();
+  // iOS sem PWA instalado: mostra instrução
+  if (isIOS() && !isStandalone()) {
+    showToast('📲 Para receber alertas: Safari → Compartilhar → "Adicionar à Tela de Início", depois abra pelo ícone');
     return;
   }
 
-  // iOS: só funciona se o app estiver instalado (Add to Home Screen)
-  if (isIOS() && !isStandalone()) {
-    showToast('📲 Para receber alertas no iPhone, instale o app: compartilhar → "Adicionar à Tela de Início"');
-    checkNotifButton();
+  if (!isPushSupported()) {
+    showToast('❌ Seu navegador não suporta notificações push');
     return;
   }
 
   try {
+    // 1. Pede permissão — deve ser chamado direto de um gesto do usuário
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
-      console.log('[Push] Permissão negada');
+      if (permission === 'denied') {
+        showToast('🔕 Notificações bloqueadas. Habilite nas configurações do navegador.');
+      }
       checkNotifButton();
       return;
     }
 
-    const reg = await navigator.serviceWorker.ready;
-    let sub   = await reg.pushManager.getSubscription();
+    // 2. Aguarda SW ativo (resolve condição de corrida no iOS)
+    const reg = await waitForActiveSW();
 
+    // 3. Obtém ou cria subscription
+    let sub = await reg.pushManager.getSubscription();
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -670,9 +684,7 @@ async function initPush() {
       });
     }
 
-    console.log('[Push] Subscription obtida:', sub.endpoint.slice(0, 60) + '...');
-
-    // Salva subscription no Firestore vinculada ao usuário
+    // 4. Salva subscription no Firestore
     if (currentUser) {
       const subJson = sub.toJSON();
       await setDoc(doc(db, 'rega', 'subscriptions'), {
@@ -683,14 +695,20 @@ async function initPush() {
           updatedAt: new Date().toISOString(),
         }
       }, { merge: true });
-      console.log('[Push] Subscription salva para', currentUser.id);
     }
 
     checkNotifButton();
     showToast('🔔 Alertas ativados com sucesso!');
   } catch(e) {
-    console.error('[Push] Erro:', e);
-    showToast('❌ Não foi possível ativar os alertas');
+    console.error('[Push] Erro:', e.name, e.message);
+    // Mensagens de erro específicas
+    if (e.name === 'NotAllowedError') {
+      showToast('🔕 Permissão negada. Verifique as configurações do navegador.');
+    } else if (e.name === 'InvalidStateError') {
+      showToast('⚠️ Recarregue o app e tente novamente.');
+    } else {
+      showToast('❌ Erro ao ativar alertas: ' + e.message);
+    }
   }
 }
 
@@ -701,9 +719,18 @@ async function requestNotif() {
 function checkNotifButton() {
   const btn = document.getElementById('notif-btn');
   if (!btn) return;
-  if (!isPushSupported()) { btn.style.display = 'none'; return; }
-  // No iOS sem PWA instalado, mostra o botão para exibir instrução de instalação
-  if (isIOS() && !isStandalone()) { btn.style.display = 'flex'; return; }
+
+  // iOS sem PWA: mostra botão para exibir instrução de instalação
+  if (isIOS() && !isStandalone()) {
+    btn.style.display = 'flex';
+    return;
+  }
+
+  if (!isPushSupported()) {
+    btn.style.display = 'none';
+    return;
+  }
+
   btn.style.display = Notification.permission === 'granted' ? 'none' : 'flex';
 }
 
@@ -789,12 +816,15 @@ function showApp() {
   nameEl.textContent = u.name;
   nameEl.style.color = u.color;
 
-  checkNotifButton();
-  // Solicita permissão Web Push automaticamente se ainda não foi decidido
-  // (funciona em Android Chrome e iOS 16.4+ com PWA instalado)
-  if (isPushSupported() && Notification.permission === 'default') {
-    setTimeout(() => initPush(), 500);
-  }
+  // Aguarda o SW registrar antes de verificar suporte a push
+  // (evita botão sumindo no Android por PushManager ainda não disponível)
+  navigator.serviceWorker.ready.then(() => {
+    checkNotifButton();
+    // Auto-solicita permissão apenas em Android/desktop (iOS requer gesto manual)
+    if (isPushSupported() && !isIOS() && Notification.permission === 'default') {
+      setTimeout(() => initPush(), 800);
+    }
+  }).catch(() => checkNotifButton());
   renderNextDay();
   renderCalendar();
   renderLegend();

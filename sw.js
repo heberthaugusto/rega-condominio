@@ -1,5 +1,5 @@
 // Service Worker — Rega do Condomínio
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 const CACHE   = `rega-cache-${VERSION}`;
 
 const ASSETS = [
@@ -11,11 +11,13 @@ const ASSETS = [
   '/rega-condominio/apple-touch-icon.png',
 ];
 
-// ── Install: pré-cache dos assets ────────────────────────────────────────────
+// ── Install: pré-cache dos assets + assume controle imediato ─────────────────
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE).then(c => c.addAll(ASSETS))
   );
+  // Força o novo SW a assumir sem esperar o usuário fechar e reabrir o app
+  self.skipWaiting();
 });
 
 // ── Activate: limpa caches antigos ───────────────────────────────────────────
