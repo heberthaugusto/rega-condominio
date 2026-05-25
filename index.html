@@ -610,66 +610,101 @@ function getResponsible(dateKey, sched) {
 }
 
 // ═══════════════════════════════════════════════════════
-// NOTIFICAÇÕES — Firebase Cloud Messaging (FCM)
+// NOTIFICAÇÕES — Web Push nativo (VAPID)
+// Compatível com Android Chrome e iOS Safari 16.4+ (PWA instalado)
 // ═══════════════════════════════════════════════════════
-const VAPID_PUBLIC_KEY = 'BEjryTDOPo54EXqG7Tttt4Y6TrEtrXFvLAK137KEH6k6xtYJMBlGNPnnCcEhmhzUYxA3dyKrDDSPBM5ZkK1NFZA';
+const VAPID_PUBLIC_KEY = 'BJNUDISSu-_hn1c8VxcsV9I_8oePTVeiMoyFvetvxFeY3LQeNVAfxrBv3Gk7KzaSj_4Bo_H6BaNj8tAX57c9-ec';
 
-async function initFCM() {
-  // Safari/iOS não suporta FCM Web Push — detecta e sai silenciosamente
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-  const isIOS    = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  if (isSafari || isIOS) {
-    console.log('[FCM] Safari/iOS detectado — notificações push não suportadas');
-    const btn = document.getElementById('notif-btn');
-    if (btn) btn.style.display = 'none';
+// Detecta se o ambiente suporta Web Push
+function isPushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+// Detecta iOS para mostrar aviso de instalação se necessário
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+}
+
+// Verifica se está rodando como PWA instalado (standalone)
+function isStandalone() {
+  return window.matchMedia('(display-mode: standalone)').matches ||
+         window.navigator.standalone === true;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw     = atob(base64);
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function initPush() {
+  if (!isPushSupported()) {
+    console.log('[Push] Web Push não suportado neste browser');
+    checkNotifButton();
+    return;
+  }
+
+  // iOS: só funciona se o app estiver instalado (Add to Home Screen)
+  if (isIOS() && !isStandalone()) {
+    showToast('📲 Para receber alertas no iPhone, instale o app: compartilhar → "Adicionar à Tela de Início"');
+    checkNotifButton();
     return;
   }
 
   try {
-    // Import lazy — só carrega o módulo se não for Safari/iOS
-    const { getMessaging, getToken, onMessage } =
-      await import('https://www.gstatic.com/firebasejs/12.13.0/firebase-messaging.js');
-
-    const messaging = getMessaging(window.__firebase_app_instance);
-
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') {
-      console.log('[FCM] Permissão negada');
+      console.log('[Push] Permissão negada');
       checkNotifButton();
-      if (Notification.permission === 'default') setTimeout(() => initFCM(), 500);
       return;
     }
 
-    const token = await getToken(messaging, { vapidKey: VAPID_PUBLIC_KEY });
-    if (token) {
-      console.log('[FCM] Token:', token);
-      if (currentUser) {
-        await setDoc(doc(db, 'rega', 'tokens'), { [currentUser.id]: token }, { merge: true });
-        console.log('[FCM] Token salvo para', currentUser.id);
-      }
+    const reg = await navigator.serviceWorker.ready;
+    let sub   = await reg.pushManager.getSubscription();
+
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
     }
 
-    onMessage(messaging, (payload) => {
-      showToast('🔔 ' + (payload.notification?.title || 'Nova notificação'));
-    });
+    console.log('[Push] Subscription obtida:', sub.endpoint.slice(0, 60) + '...');
+
+    // Salva subscription no Firestore vinculada ao usuário
+    if (currentUser) {
+      const subJson = sub.toJSON();
+      await setDoc(doc(db, 'rega', 'subscriptions'), {
+        [currentUser.id]: {
+          endpoint: subJson.endpoint,
+          keys: subJson.keys,
+          userId: currentUser.id,
+          updatedAt: new Date().toISOString(),
+        }
+      }, { merge: true });
+      console.log('[Push] Subscription salva para', currentUser.id);
+    }
 
     checkNotifButton();
+    showToast('🔔 Alertas ativados com sucesso!');
   } catch(e) {
-    console.error('[FCM] Erro ao inicializar:', e);
+    console.error('[Push] Erro:', e);
+    showToast('❌ Não foi possível ativar os alertas');
   }
 }
 
 async function requestNotif() {
-  await initFCM();
+  await initPush();
 }
 
 function checkNotifButton() {
   const btn = document.getElementById('notif-btn');
   if (!btn) return;
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-  const isIOS    = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  if (isSafari || isIOS) { btn.style.display = 'none'; return; }
-  btn.style.display = (typeof Notification !== 'undefined' && Notification.permission === 'granted') ? 'none' : 'flex';
+  if (!isPushSupported()) { btn.style.display = 'none'; return; }
+  // No iOS sem PWA instalado, mostra o botão para exibir instrução de instalação
+  if (isIOS() && !isStandalone()) { btn.style.display = 'flex'; return; }
+  btn.style.display = Notification.permission === 'granted' ? 'none' : 'flex';
 }
 
 // ═══════════════════════════════════════════════════════
@@ -755,11 +790,10 @@ function showApp() {
   nameEl.style.color = u.color;
 
   checkNotifButton();
-  // Solicita permissão FCM apenas em browsers que suportam (não Safari/iOS)
-  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-  const isIOS    = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-  if (!isSafari && !isIOS && typeof Notification !== 'undefined' && Notification.permission === 'default') {
-    setTimeout(() => initFCM(), 500);
+  // Solicita permissão Web Push automaticamente se ainda não foi decidido
+  // (funciona em Android Chrome e iOS 16.4+ com PWA instalado)
+  if (isPushSupported() && Notification.permission === 'default') {
+    setTimeout(() => initPush(), 500);
   }
   renderNextDay();
   renderCalendar();
