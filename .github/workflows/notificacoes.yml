@@ -1,0 +1,235 @@
+name: Notificações de Rega
+
+on:
+ schedule:
+   # 19h55 horário de Brasília = 22h55 UTC (lembrete véspera)
+   - cron: '55 22 * * *'
+   # 07h55 horário de Brasília = 10h55 UTC (lembrete no dia)
+   - cron: '55 10 * * *'
+ workflow_dispatch:
+
+jobs:
+ notificar:
+   runs-on: ubuntu-latest
+   steps:
+     - name: Enviar notificação via FCM
+       env:
+         FIREBASE_PROJECT_ID: "rega-condominio"
+         FIREBASE_CLIENT_EMAIL: "firebase-adminsdk-fbsvc@rega-condominio.iam.gserviceaccount.com"
+         FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+       run: |
+         node << 'SCRIPT'
+         const https = require('https');
+         const crypto = require('crypto');
+
+         const PROJECT_ID    = process.env.FIREBASE_PROJECT_ID;
+         const CLIENT_EMAIL  = process.env.FIREBASE_CLIENT_EMAIL;
+         const PRIVATE_KEY   = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+
+         const GROUP_A    = ['heberth','simone','flavio','bruno','luciano'];
+         const START_A    = new Date('2026-05-19T00:00:00-03:00');
+         const START_K    = new Date('2026-05-17T00:00:00-03:00');
+         const USER_NAMES = {
+           heberth: 'Heberth', simone: 'Simone', flavio: 'Flávio',
+           bruno: 'Bruno', luciano: 'Luciano', karina: 'Karina'
+         };
+
+         const toKey   = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+         const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r; };
+         const isSun   = d => d.getDay() === 0;
+         const isMon   = d => d.getDay() === 1;
+
+         const karinaSundays = new Set();
+         let kd = new Date(START_K);
+         while (kd <= addDays(new Date(), 400)) {
+           karinaSundays.add(toKey(kd));
+           kd = addDays(kd, 14);
+         }
+
+         function getResponsibleFor(targetDate) {
+           const target = toKey(targetDate);
+           let cur = new Date(START_A);
+           let idx = 0;
+           while (cur <= addDays(targetDate, 1)) {
+             if (isSun(cur)) { cur = addDays(cur, 1); continue; }
+             const curKey  = toKey(cur);
+             const prevKey = toKey(addDays(cur, -1));
+             if (isMon(cur) && karinaSundays.has(prevKey)) { cur = addDays(cur, 1); continue; }
+             if (curKey === target) return GROUP_A[idx % GROUP_A.length];
+             idx++;
+             let next = addDays(cur, 2);
+             if (isSun(next)) next = addDays(next, 1);
+             const nextPrev = toKey(addDays(next, -1));
+             if (isMon(next) && karinaSundays.has(nextPrev)) next = addDays(next, 1);
+             cur = next;
+           }
+           return null;
+         }
+
+         const now = new Date();
+         const brNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+         const hour  = brNow.getHours();
+
+         let targetDate, tipoNotif;
+         if (hour >= 19) {
+           targetDate = addDays(brNow, 1);
+           tipoNotif  = 'vespera';
+         } else {
+           targetDate = new Date(brNow);
+           tipoNotif  = 'dia';
+         }
+         targetDate.setHours(0,0,0,0);
+
+         const respA = getResponsibleFor(targetDate);
+         const respK = karinaSundays.has(toKey(targetDate)) ? 'karina' : null;
+         const responsavel = respK || respA;
+
+         if (!responsavel) {
+           console.log('Nenhum responsável — sem notificação.');
+           process.exit(0);
+         }
+
+         const nome    = USER_NAMES[responsavel];
+         const dataStr = targetDate.toLocaleDateString('pt-BR', {
+           weekday:'long', day:'numeric', month:'long', timeZone:'America/Sao_Paulo'
+         });
+
+         const titulo   = tipoNotif === 'vespera'
+           ? `🌿 Amanhã é seu dia de regar!`
+           : `💧 Hoje é seu dia de regar, ${nome}!`;
+         const mensagem = tipoNotif === 'vespera'
+           ? `${nome}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
+           : `Bom dia, ${nome}! Hoje (${dataStr}) é sua vez de molhar as plantas. Após regar, confirme no app! 🌱`;
+
+         console.log(`Responsável: ${nome} (${tipoNotif})`);
+         console.log(`Título: ${titulo}`);
+
+         function base64url(str) {
+           return Buffer.from(str).toString('base64')
+             .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+         }
+
+         const now2    = Math.floor(Date.now()/1000);
+         const header  = base64url(JSON.stringify({ alg:'RS256', typ:'JWT' }));
+         const payload = base64url(JSON.stringify({
+           iss: CLIENT_EMAIL,
+           scope: 'https://www.googleapis.com/auth/firebase.messaging',
+           aud: 'https://oauth2.googleapis.com/token',
+           exp: now2 + 3600,
+           iat: now2,
+         }));
+
+         const sign = crypto.createSign('RSA-SHA256');
+         sign.update(`${header}.${payload}`);
+         const signature = sign.sign(PRIVATE_KEY, 'base64')
+           .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+
+         const jwt = `${header}.${payload}.${signature}`;
+
+         async function getAccessToken() {
+           return new Promise((resolve, reject) => {
+             const body = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
+             const req  = https.request({
+               hostname: 'oauth2.googleapis.com',
+               path: '/token',
+               method: 'POST',
+               headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+             }, res => {
+               let d = '';
+               res.on('data', c => d += c);
+               res.on('end', () => {
+                 const parsed = JSON.parse(d);
+                 if (parsed.access_token) resolve(parsed.access_token);
+                 else reject(new Error('Token error: ' + d));
+               });
+             });
+             req.on('error', reject);
+             req.write(body);
+             req.end();
+           });
+         }
+
+         async function getTokens(accessToken) {
+           return new Promise((resolve, reject) => {
+             const req = https.request({
+               hostname: 'firestore.googleapis.com',
+               path: `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/tokens`,
+               method: 'GET',
+               headers: { 'Authorization': `Bearer ${accessToken}` }
+             }, res => {
+               let d = '';
+               res.on('data', c => d += c);
+               res.on('end', () => {
+                 try {
+                   const doc = JSON.parse(d);
+                   const fields = doc.fields || {};
+                   const tokens = Object.values(fields).map(v => v.stringValue).filter(Boolean);
+                   resolve(tokens);
+                 } catch(e) { resolve([]); }
+               });
+             });
+             req.on('error', reject);
+             req.end();
+           });
+         }
+
+         async function sendNotification(accessToken, token) {
+           return new Promise((resolve) => {
+             const body = JSON.stringify({
+               message: {
+                 token,
+                 notification: { title: titulo, body: mensagem },
+                 webpush: {
+                   notification: {
+                     title: titulo,
+                     body: mensagem,
+                     icon: 'https://heberthaugusto.github.io/rega-condominio/icon-192.png',
+                   }
+                 }
+               }
+             });
+             const req = https.request({
+               hostname: 'fcm.googleapis.com',
+               path: `/v1/projects/${PROJECT_ID}/messages:send`,
+               method: 'POST',
+               headers: {
+                 'Authorization': `Bearer ${accessToken}`,
+                 'Content-Type': 'application/json',
+                 'Content-Length': Buffer.byteLength(body),
+               }
+             }, res => {
+               let d = '';
+               res.on('data', c => d += c);
+               res.on('end', () => {
+                 console.log(`FCM response (${res.statusCode}):`, d);
+                 resolve(res.statusCode === 200);
+               });
+             });
+             req.on('error', e => { console.error('Erro:', e); resolve(false); });
+             req.write(body);
+             req.end();
+           });
+         }
+
+         (async () => {
+           try {
+             const accessToken = await getAccessToken();
+             console.log('Access token obtido!');
+             const tokens = await getTokens(accessToken);
+             console.log(`Tokens encontrados: ${tokens.length}`);
+             if (tokens.length === 0) {
+               console.log('Nenhum token registrado.');
+               process.exit(0);
+             }
+             let enviados = 0;
+             for (const token of tokens) {
+               const ok = await sendNotification(accessToken, token);
+               if (ok) enviados++;
+             }
+             console.log(`Notificações enviadas: ${enviados}/${tokens.length}`);
+           } catch(e) {
+             console.error('Erro geral:', e);
+             process.exit(1);
+           }
+         })();
+         SCRIPT
