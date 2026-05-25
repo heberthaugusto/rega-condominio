@@ -649,20 +649,6 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
-// Aguarda o SW estar completamente ativo e controlando a página
-// Resolve condição de corrida crítica no iOS
-async function waitForActiveSW() {
-  const reg = await navigator.serviceWorker.ready;
-  // Se já há um controller ativo, resolve imediatamente
-  if (navigator.serviceWorker.controller) return reg;
-  // Caso contrário aguarda o controllerchange (SW novo assumindo)
-  return new Promise(resolve => {
-    navigator.serviceWorker.addEventListener('controllerchange', () => resolve(reg), { once: true });
-    // Fallback: resolve após 3s mesmo sem controller (evita trava)
-    setTimeout(() => resolve(reg), 3000);
-  });
-}
-
 async function initPush() {
   // iOS sem PWA instalado: mostra instrução
   if (isIOS() && !isStandalone()) {
@@ -676,90 +662,77 @@ async function initPush() {
   }
 
   try {
-    // ── ETAPA 1: pedir permissão ──────────────────────────────────────────
-    // CRÍTICO para iOS: Notification.requestPermission() deve ser a PRIMEIRA
-    // chamada async após o gesto do usuário, sem nenhum await anterior.
-    // Qualquer await antes quebra a "user gesture chain" e gera
-    // "missing or insufficient permission".
+    // ETAPA 1 — pedir permissão
+    // Deve ser o primeiro await após o gesto — crítico para iOS
     const permission = await Notification.requestPermission();
-
     if (permission !== 'granted') {
-      if (permission === 'denied') {
-        showToast('🔕 Bloqueado. Vá em Ajustes → Safari → Notificações para habilitar.');
-      } else {
-        showToast('⚠️ Permissão não concedida.');
-      }
+      showToast(permission === 'denied'
+        ? '🔕 Bloqueado. Habilite em Ajustes → Safari → Notificações.'
+        : '⚠️ Permissão não concedida.');
       checkNotifButton();
       return;
     }
 
-    // ── ETAPA 2: completa subscription (SW + Firestore) ─────────────────
-    // Separado do requestPermission para respeitar o requisito do iOS
-    // de não criar subscription na mesma chamada que pediu permissão
+    // ETAPA 2 — subscription + salvar
     await completePushSubscription();
-    showToast('🔔 Alertas ativados com sucesso!');
 
   } catch(e) {
-    console.error('[Push] Erro:', e.name, e.message);
-    if (e.name === 'NotAllowedError') {
-      showToast('🔕 Permissão negada. Verifique as configurações do app.');
-    } else if (e.name === 'InvalidStateError') {
-      showToast('⚠️ Feche e reabra o app pelo ícone e tente novamente.');
-    } else if (e.message?.toLowerCase().includes('permission')) {
-      showToast('⚠️ iOS: feche o app, reabra pelo ícone da tela inicial e tente novamente.');
-    } else {
-      showToast('❌ Erro: ' + (e.message || e.name));
-    }
+    console.error('[Push] initPush erro:', e.name, e.message);
+    showToast('❌ Erro: ' + (e.message || e.name));
   }
 }
 
-// Completa a subscription sem pedir permissão (já concedida anteriormente)
+// Cria ou recupera a subscription e salva no Firestore
 async function completePushSubscription() {
   try {
-    console.log('[Push] Iniciando completePushSubscription...');
-    const reg = await waitForActiveSW();
-    console.log('[Push] SW ativo:', !!reg);
+    // navigator.serviceWorker.ready é a forma mais compatível com iOS
+    // Não usamos wrapper customizado — evita timeout e condições de corrida
+    const reg = await navigator.serviceWorker.ready;
 
     let sub = await reg.pushManager.getSubscription();
-    console.log('[Push] Subscription existente:', !!sub);
 
     if (!sub) {
-      console.log('[Push] Criando nova subscription...');
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
       });
-      console.log('[Push] Subscription criada:', sub.endpoint.slice(0,50) + '...');
     }
 
-    if (currentUser) {
-      console.log('[Push] Salvando no Firestore para', currentUser.id, '...');
-      const subJson = sub.toJSON();
-
-      // Gera um ID único por dispositivo baseado no endpoint
-      // Assim a mesma pessoa pode ter Android + iOS registrados simultaneamente
-      const deviceId = btoa(subJson.endpoint).slice(-20).replace(/[^a-zA-Z0-9]/g, '_');
-      const fieldKey = currentUser.id + '_' + deviceId;
-
-      await setDoc(doc(db, 'rega', 'subscriptions'), {
-        [fieldKey]: {
-          endpoint: subJson.endpoint,
-          keys: subJson.keys,
-          userId: currentUser.id,
-          deviceId: deviceId,
-          updatedAt: new Date().toISOString(),
-        }
-      }, { merge: true });
-      console.log('[Push] ✅ Subscription salva no Firestore:', fieldKey);
-      showToast('✅ Alertas vinculados a ' + currentUser.name + '!');
-    } else {
-      console.warn('[Push] currentUser é null — subscription não salva');
+    if (!currentUser) {
+      // Sem usuário logado ainda — subscription criada mas salva depois no showApp
+      console.log('[Push] Permissão concedida, subscription aguarda login');
+      checkNotifButton();
+      return;
     }
-    checkNotifButton();
+
+    await savePushSubscription(sub);
+
   } catch(e) {
-    console.error('[Push] Erro em completePushSubscription:', e.name, e.message);
+    console.error('[Push] completePushSubscription erro:', e.name, e.message);
     showToast('❌ Erro ao salvar alerta: ' + (e.message || e.name));
   }
+}
+
+// Salva subscription no Firestore — separado para reuso no showApp
+async function savePushSubscription(sub) {
+  const subJson = sub.toJSON();
+  // ID único por dispositivo: evita sobrescrever outro dispositivo do mesmo usuário
+  const deviceId = btoa(subJson.endpoint).slice(-20).replace(/[^a-zA-Z0-9]/g, '_');
+  const fieldKey = currentUser.id + '_' + deviceId;
+
+  await setDoc(doc(db, 'rega', 'subscriptions'), {
+    [fieldKey]: {
+      endpoint: subJson.endpoint,
+      keys: subJson.keys,
+      userId: currentUser.id,
+      deviceId: deviceId,
+      updatedAt: new Date().toISOString(),
+    }
+  }, { merge: true });
+
+  console.log('[Push] ✅ Subscription salva:', fieldKey);
+  showToast('✅ Alertas vinculados a ' + currentUser.name + '!');
+  checkNotifButton();
 }
 
 async function requestNotif() {
@@ -867,13 +840,18 @@ function showApp() {
   nameEl.textContent = u.name;
   nameEl.style.color = u.color;
 
-  // Aguarda SW pronto, verifica botão e completa subscription se permissão já concedida
-  navigator.serviceWorker.ready.then(() => {
+  // Aguarda SW pronto e verifica botão
+  navigator.serviceWorker.ready.then(async reg => {
     checkNotifButton();
-    // Se o usuário já concedeu permissão na tela inicial (antes do login),
-    // completa a subscription agora que sabemos qual usuário está logado
+    // Se permissão já foi concedida antes do login, salva a subscription
+    // agora que sabemos qual usuário está logado
     if (isPushSupported() && Notification.permission === 'granted') {
-      completePushSubscription();
+      try {
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) await savePushSubscription(sub);
+      } catch(e) {
+        console.warn('[Push] Erro ao salvar subscription no login:', e.message);
+      }
     }
   }).catch(() => checkNotifButton());
   renderNextDay();

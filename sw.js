@@ -1,5 +1,5 @@
 // Service Worker — Rega do Condomínio
-const VERSION = '1.3.0';
+const VERSION = '1.4.0';
 const CACHE   = `rega-cache-${VERSION}`;
 
 const ASSETS = [
