@@ -57,7 +57,7 @@ jobs:
 
           // ── Configuração VAPID ──────────────────────────────────────────────
           webpush.setVapidDetails(
-            'mailto:heberth@rega-condominio',
+            'mailto:heberthbeta@gmail.com',
             process.env.VAPID_PUBLIC_KEY,
             process.env.VAPID_PRIVATE_KEY
           );
@@ -321,11 +321,7 @@ jobs:
 
               console.log(`Notificações enviadas: ${enviados}/${subsFiltradas.length}`);
 
-              // Subscriptions inválidas são ignoradas silenciosamente
-              // Limpeza manual pelo Firebase Console quando necessário
-              if (invalidas.length > 0) {
-                console.log(`${invalidas.length} subscription(s) inválida(s) ignorada(s):`, invalidas);
-              }
+
             } catch(e) {
               console.error('Erro geral:', e);
               process.exit(1);
