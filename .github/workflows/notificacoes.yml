@@ -320,38 +320,38 @@ jobs:
               // Remove subscriptions inválidas do Firestore
               if (invalidas.length > 0) {
                 console.log(`Removendo ${invalidas.length} subscription(s) inválida(s):`, invalidas);
-                try {
-                  // Monta payload PATCH para deletar os campos inválidos
-                  const deleteFields = invalidas.reduce((acc, key) => {
-                    acc[key] = { nullValue: null };
-                    return acc;
-                  }, {});
-                  const patchBody = JSON.stringify({ fields: deleteFields });
-                  const fieldMask = invalidas.map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
-                  await new Promise((resolve, reject) => {
-                    const req = https.request({
-                      hostname: 'firestore.googleapis.com',
-                      path: `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/subscriptions?${fieldMask}`,
-                      method: 'PATCH',
-                      headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'Content-Type': 'application/json',
-                      }
-                    }, res => {
-                      let d = '';
-                      res.on('data', c => d += c);
-                      res.on('end', () => {
-                        console.log(`Limpeza concluída (status ${res.statusCode})`);
-                        resolve();
-                      });
+                // Para deletar campos no Firestore, envia PATCH com campos vazios
+                // e updateMask listando apenas os campos a remover
+                const fieldMask = invalidas.map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
+                const patchBody = JSON.stringify({ fields: {} });
+                const cleanup = new Promise((resolve) => {
+                  const timer = setTimeout(() => {
+                    console.warn('Timeout na limpeza — continuando');
+                    resolve();
+                  }, 8000);
+                  const req = https.request({
+                    hostname: 'firestore.googleapis.com',
+                    path: `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/subscriptions?${fieldMask}`,
+                    method: 'PATCH',
+                    headers: {
+                      'Authorization': `Bearer ${accessToken}`,
+                      'Content-Type': 'application/json',
+                      'Content-Length': Buffer.byteLength(patchBody),
+                    }
+                  }, res => {
+                    let d = '';
+                    res.on('data', c => d += c);
+                    res.on('end', () => {
+                      clearTimeout(timer);
+                      console.log(`Limpeza concluída (status ${res.statusCode})`);
+                      resolve();
                     });
-                    req.on('error', reject);
-                    req.write(patchBody);
-                    req.end();
                   });
-                } catch(e) {
-                  console.warn('Aviso: falha ao limpar subscriptions inválidas:', e.message);
-                }
+                  req.on('error', (e) => { clearTimeout(timer); console.warn('Erro limpeza:', e.message); resolve(); });
+                  req.write(patchBody);
+                  req.end();
+                });
+                await cleanup;
               }
             } catch(e) {
               console.error('Erro geral:', e);
