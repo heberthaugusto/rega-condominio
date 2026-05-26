@@ -1156,6 +1156,11 @@ function openModal(key, d) {
     html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">🙋 Eu reguei no lugar!</button>`;
   }
 
+  // Desfazer voluntário: só quem se voluntariou pode desfazer, e apenas se não regou
+  if (volunteerW && volunteerW.by === currentUser.id && !watered) {
+    html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoVolunteer()">↩️ Desfazer voluntariado</button>`;
+  }
+
   // Registrar chuva: qualquer um, se ainda não registrou
   if (!isRain) {
     html += `<button class="action-btn-outline" style="border:1px solid #60a5fa44;color:#60a5fa" onclick="confirmRain()">🌧️ Choveu neste dia</button>`;
@@ -1240,6 +1245,23 @@ async function confirmVolunteer() {
     showToast('🙋 Obrigado por se voluntariar!');
   }
 
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
+}
+
+async function undoVolunteer() {
+  // Remove o voluntariado
+  delete volunteered[modalKey];
+  await save('rega-volunteered', volunteered);
+
+  // Remove o swap associado a este voluntariado (se existir)
+  if (swaps[modalKey] && swaps[modalKey].coveredBy === currentUser.id) {
+    delete swaps[modalKey];
+    await save('rega-swaps', swaps);
+  }
+
+  showToast('↩️ Voluntariado desfeito');
   document.getElementById('modal').style.display = 'none';
   renderCalendar();
   renderNextDay();
