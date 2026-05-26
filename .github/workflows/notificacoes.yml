@@ -270,7 +270,6 @@ jobs:
             try {
               const doc    = JSON.parse(res.body);
               const fields = doc.fields || {};
-              // Cada campo é userId_deviceId — suporta múltiplos dispositivos por usuário
               return Object.entries(fields).map(([fieldKey, val]) => {
                 const m = val.mapValue?.fields || {};
                 return {
@@ -286,10 +285,69 @@ jobs:
             } catch(e) { return []; }
           }
 
+          // Busca swaps e registros do Firestore para aplicar substituições
+          async function getDados(accessToken) {
+            const res = await httpsGet('firestore.googleapis.com',
+              `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/dados`,
+              { 'Authorization': `Bearer ${accessToken}` });
+            try {
+              const doc    = JSON.parse(res.body);
+              const fields = doc.fields || {};
+
+              // Extrai swaps: { 'YYYY-MM-DD': { skippedBy, coveredBy } }
+              const swapsRaw = fields.swaps?.mapValue?.fields || {};
+              const swaps = {};
+              for (const [date, val] of Object.entries(swapsRaw)) {
+                const m = val.mapValue?.fields || {};
+                swaps[date] = {
+                  skippedBy: m.skippedBy?.stringValue,
+                  coveredBy: m.coveredBy?.stringValue,
+                };
+              }
+
+              // Extrai records: { 'YYYY-MM-DD': { by } }
+              const recordsRaw = fields.records?.mapValue?.fields || {};
+              const records = {};
+              for (const [date, val] of Object.entries(recordsRaw)) {
+                const m = val.mapValue?.fields || {};
+                records[date] = { by: m.by?.stringValue };
+              }
+
+              // Extrai volunteered: { 'YYYY-MM-DD': { by } }
+              const volRaw = fields.volunteered?.mapValue?.fields || {};
+              const volunteered = {};
+              for (const [date, val] of Object.entries(volRaw)) {
+                const m = val.mapValue?.fields || {};
+                volunteered[date] = { by: m.by?.stringValue };
+              }
+
+              return { swaps, records, volunteered };
+            } catch(e) { return { swaps: {}, records: {}, volunteered: {} }; }
+          }
+
+          // Aplica swaps: se o responsável base cobriu alguém que ainda não regou,
+          // o slot passa para o devedor (mesma lógica do app)
+          function applySwap(baseResponsavel, dateKey, swaps, records, volunteered) {
+            const pendingDebtors = Object.entries(swaps)
+              .filter(([swapDate, swap]) => {
+                if (swap.coveredBy !== baseResponsavel) return false;
+                if (swapDate >= dateKey) return false;
+                const debtor = swap.skippedBy;
+                const hasRepaid =
+                  Object.entries(records).some(([d, r]) => d > swapDate && r.by === debtor) ||
+                  Object.entries(volunteered).some(([d, v]) => d > swapDate && v.by === debtor);
+                return !hasRepaid;
+              })
+              .sort(([a], [b]) => a.localeCompare(b));
+
+            if (pendingDebtors.length === 0) return baseResponsavel;
+            return pendingDebtors[0][1].skippedBy;
+          }
+
           (async () => {
             try {
-              const accessToken    = await getAccessToken();
-              const subscriptions  = await getSubscriptions(accessToken);
+              const accessToken   = await getAccessToken();
+              const subscriptions = await getSubscriptions(accessToken);
               console.log(`Subscriptions encontradas: ${subscriptions.length}`);
 
               if (subscriptions.length === 0) {
@@ -297,16 +355,35 @@ jobs:
                 process.exit(0);
               }
 
-              // Filtra apenas os dispositivos do responsável do dia
-              const subsFiltradas = subscriptions.filter(s => s.userId === responsavel);
-              console.log(`Dispositivos de ${nome}: ${subsFiltradas.length}/${subscriptions.length} total`);
+              // Busca swaps/records do Firestore para calcular responsável real
+              const { swaps, records, volunteered } = await getDados(accessToken);
+              const targetKey  = toKey(targetDate);
+              const responsavelFinal = responsavel === 'karina'
+                ? 'karina'
+                : applySwap(responsavel, targetKey, swaps, records, volunteered);
+
+              if (responsavelFinal !== responsavel) {
+                console.log(`Swap ativo: ${responsavel} → ${responsavelFinal}`);
+              }
+
+              const nomeFinal = USER_NAMES[responsavelFinal] || nome;
+              const tituloFinal  = tipoNotif === 'vespera'
+                ? `🌿 Amanhã é seu dia de regar!`
+                : `💧 Hoje é seu dia de regar, ${nomeFinal}!`;
+              const mensagemFinal = tipoNotif === 'vespera'
+                ? `${nomeFinal}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
+                : `Bom dia, ${nomeFinal}! Hoje (${dataStr}) é sua vez de molhar as plantas. Após regar, confirme no app! 🌱`;
+
+              // Filtra apenas os dispositivos do responsável final (com swap aplicado)
+              const subsFiltradas = subscriptions.filter(s => s.userId === responsavelFinal);
+              console.log(`Dispositivos de ${nomeFinal}: ${subsFiltradas.length}/${subscriptions.length} total`);
 
               if (subsFiltradas.length === 0) {
-                console.log(`Nenhum dispositivo registrado para ${nome}.`);
+                console.log(`Nenhum dispositivo registrado para ${nomeFinal}.`);
                 process.exit(0);
               }
 
-              const payload = JSON.stringify({ title: titulo, body: mensagem });
+              const payload = JSON.stringify({ title: tituloFinal, body: mensagemFinal });
               let enviados  = 0;
 
               for (const sub of subsFiltradas) {
