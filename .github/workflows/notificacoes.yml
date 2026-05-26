@@ -303,9 +303,8 @@ jobs:
                 process.exit(0);
               }
 
-              const payload   = JSON.stringify({ title: titulo, body: mensagem });
-              let enviados    = 0;
-              const invalidas = []; // subscriptions a remover (410 = expirada, 403 = inválida)
+              const payload = JSON.stringify({ title: titulo, body: mensagem });
+              let enviados  = 0;
 
               for (const sub of subsFiltradas) {
                 try {
@@ -316,62 +315,16 @@ jobs:
                   console.log(`✅ Notificação enviada para ${sub.userId} (${sub.fieldKey})`);
                   enviados++;
                 } catch(e) {
-                  const status = e.statusCode || 0;
-                  console.error(`❌ Erro para ${sub.userId}: ${status}`);
-                  // 410 = Gone (expirada definitivamente), 403 = chave VAPID diferente
-                  if (status === 410 || status === 403) {
-                    invalidas.push(sub.fieldKey);
-                  }
+                  console.error(`❌ Erro para ${sub.userId}: ${e.statusCode || e.message}`);
                 }
               }
 
               console.log(`Notificações enviadas: ${enviados}/${subsFiltradas.length}`);
 
-              // Remove subscriptions inválidas do Firestore
+              // Subscriptions inválidas são ignoradas silenciosamente
+              // Limpeza manual pelo Firebase Console quando necessário
               if (invalidas.length > 0) {
-                console.log(`Removendo ${invalidas.length} subscription(s) inválida(s):`, invalidas);
-                try {
-                  // Busca o documento atual, remove os campos inválidos e salva de volta
-                  const docRes = await httpsGet('firestore.googleapis.com',
-                    `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/subscriptions`,
-                    { 'Authorization': `Bearer ${accessToken}` });
-
-                  const doc    = JSON.parse(docRes.body);
-                  const fields = doc.fields || {};
-
-                  // Remove os campos inválidos do objeto
-                  invalidas.forEach(k => delete fields[k]);
-
-                  // Salva o documento limpo com todos os campos restantes
-                  const updateBody = JSON.stringify({ fields });
-                  const allFields  = Object.keys(fields).map(k => `updateMask.fieldPaths=${encodeURIComponent(k)}`).join('&');
-                  const patchPath  = `/v1/projects/${PROJECT_ID}/databases/(default)/documents/rega/subscriptions${allFields ? '?' + allFields : ''}`;
-
-                  await new Promise((resolve) => {
-                    const timer = setTimeout(() => { console.warn('Timeout limpeza'); resolve(); }, 8000);
-                    const req = https.request({
-                      hostname: 'firestore.googleapis.com',
-                      path: patchPath,
-                      method: 'PATCH',
-                      timeout: 8000,
-                      headers: {
-                        'Authorization': `Bearer ${accessToken}`,
-                        'Content-Type': 'application/json',
-                        'Content-Length': Buffer.byteLength(updateBody),
-                      }
-                    }, res => {
-                      let d = '';
-                      res.on('data', c => d += c);
-                      res.on('end', () => { clearTimeout(timer); console.log(`Limpeza OK (status ${res.statusCode})`); resolve(); });
-                    });
-                    req.on('timeout', () => { req.destroy(); clearTimeout(timer); console.warn('Timeout limpeza'); resolve(); });
-                    req.on('error',   (e) => { clearTimeout(timer); console.warn('Erro limpeza:', e.message); resolve(); });
-                    req.write(updateBody);
-                    req.end();
-                  });
-                } catch(e) {
-                  console.warn('Limpeza ignorada:', e.message);
-                }
+                console.log(`${invalidas.length} subscription(s) inválida(s) ignorada(s):`, invalidas);
               }
             } catch(e) {
               console.error('Erro geral:', e);
