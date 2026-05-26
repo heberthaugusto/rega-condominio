@@ -50,10 +50,12 @@ jobs:
           const webpush = require('web-push');
 
           // Timeout global: mata o processo após 45s para não travar o workflow
-          setTimeout(() => {
+          const globalTimer = setTimeout(() => {
             console.error('Timeout global atingido — encerrando forçadamente');
             process.exit(1);
           }, 45000);
+          // Permite que o processo encerre normalmente sem aguardar o timer
+          globalTimer.unref();
 
           // ── Configuração VAPID ──────────────────────────────────────────────
           webpush.setVapidDetails(
