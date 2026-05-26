@@ -53,7 +53,19 @@ jobs:
           // ── Configuração Firebase ───────────────────────────────────────────
           const PROJECT_ID   = process.env.FIREBASE_PROJECT_ID;
           const CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL;
-          const PRIVATE_KEY  = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+          // Normaliza a chave privada — o secret pode ter \n literal ou quebras reais
+          let PRIVATE_KEY = process.env.FIREBASE_PRIVATE_KEY;
+          // Substitui \n literal por quebra de linha real
+          PRIVATE_KEY = PRIVATE_KEY.replace(/\\n/g, '\n');
+          // Garante que o cabeçalho/rodapé PEM estejam em linhas separadas
+          if (!PRIVATE_KEY.includes('\n-----')) {
+            PRIVATE_KEY = PRIVATE_KEY
+              .replace('-----BEGIN PRIVATE KEY-----', '-----BEGIN PRIVATE KEY-----\n')
+              .replace('-----END PRIVATE KEY-----', '\n-----END PRIVATE KEY-----');
+          }
+          // Log para diagnóstico (mostra só o início e fim, nunca o conteúdo)
+          const pkLines = PRIVATE_KEY.split('\n');
+          console.log('[Chave] Linhas:', pkLines.length, '| Início:', pkLines[0], '| Fim:', pkLines[pkLines.length-1]);
 
           // ── Calendário (mesma lógica do app) ────────────────────────────────
           const GROUP_A    = ['simone','flavio','bruno','luciano','heberth'];
