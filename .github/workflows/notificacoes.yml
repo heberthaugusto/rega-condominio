@@ -26,8 +26,8 @@ jobs:
   notificar:
     runs-on: ubuntu-latest
     steps:
-      - name: Instalar dependência web-push
-        run: npm install web-push
+      - name: Instalar dependências
+        run: npm install web-push google-auth-library
 
       - name: Enviar notificações via Web Push nativo
         env:
@@ -40,9 +40,8 @@ jobs:
           INPUT_TIPO_TESTE:      ${{ github.event.inputs.tipo_teste }}
         run: |
           node << 'SCRIPT'
-          const https    = require('https');
-          const crypto   = require('crypto');
-          const webpush  = require('web-push');
+          const https   = require('https');
+          const webpush = require('web-push');
 
           // ── Configuração VAPID ──────────────────────────────────────────────
           webpush.setVapidDetails(
@@ -171,37 +170,18 @@ jobs:
           console.log(`Responsável: ${nome} (${tipoNotif})`);
           console.log(`Título: ${titulo}`);
 
-          // ── JWT para Firestore ───────────────────────────────────────────────
-          function b64url(str) {
-            return Buffer.from(str).toString('base64')
-              .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-          }
+          // ── Autenticação via google-auth-library (compatível com Node 22) ────
+          const { JWT } = require('google-auth-library');
 
-          const now2    = Math.floor(Date.now()/1000);
-          const header  = b64url(JSON.stringify({ alg:'RS256', typ:'JWT' }));
-          const payload = b64url(JSON.stringify({
-            iss: CLIENT_EMAIL,
-            scope: 'https://www.googleapis.com/auth/datastore',
-            aud: 'https://oauth2.googleapis.com/token',
-            exp: now2 + 3600,
-            iat: now2,
-          }));
-          const sign = crypto.createSign('RSA-SHA256');
-          sign.update(`${header}.${payload}`);
-          const sig = sign.sign(PRIVATE_KEY,'base64')
-            .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-          const jwt = `${header}.${payload}.${sig}`;
-
-          function httpsPost(hostname, path, headers, body) {
-            return new Promise((resolve, reject) => {
-              const req = https.request({ hostname, path, method:'POST', headers }, res => {
-                let d = '';
-                res.on('data', c => d += c);
-                res.on('end', () => resolve({ status: res.statusCode, body: d }));
-              });
-              req.on('error', reject);
-              req.write(body); req.end();
+          async function getAccessToken() {
+            const client = new JWT({
+              email: CLIENT_EMAIL,
+              key:   PRIVATE_KEY,
+              scopes: ['https://www.googleapis.com/auth/datastore'],
             });
+            const token = await client.getAccessToken();
+            if (!token.token) throw new Error('Falha ao obter access token');
+            return token.token;
           }
 
           function httpsGet(hostname, path, headers) {
@@ -214,15 +194,6 @@ jobs:
               req.on('error', reject);
               req.end();
             });
-          }
-
-          async function getAccessToken() {
-            const body = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
-            const res  = await httpsPost('oauth2.googleapis.com', '/token',
-              { 'Content-Type': 'application/x-www-form-urlencoded' }, body);
-            const parsed = JSON.parse(res.body);
-            if (!parsed.access_token) throw new Error('Token error: ' + res.body);
-            return parsed.access_token;
           }
 
           async function getSubscriptions(accessToken) {
