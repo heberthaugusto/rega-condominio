@@ -415,6 +415,8 @@ let records    = {}; // { 'YYYY-MM-DD': { by, at } }
 let rainDays   = {}; // { 'YYYY-MM-DD': true }
 let skipped    = {}; // { 'YYYY-MM-DD': { by, at } }
 let volunteered = {}; // { 'YYYY-MM-DD': { by, at } }
+let swaps      = {}; // { 'YYYY-MM-DD': { skippedBy: userId, coveredBy: userId } }
+                     // quando coveredBy cobre skippedBy, o próximo slot de coveredBy vai para skippedBy
 
 // ═══════════════════════════════════════════════════════
 // FIREBASE STORAGE — COMPARTILHADO EM TEMPO REAL
@@ -432,17 +434,19 @@ async function loadAll() {
       rainDays    = d.rain        || {};
       skipped     = d.skipped     || {};
       volunteered = d.volunteered || {};
+      swaps       = d.swaps       || {};
     }
   } catch(e) {
     console.warn('[Firebase] loadAll error:', e);
-    records = {}; rainDays = {}; skipped = {}; volunteered = {};
+    records = {}; rainDays = {}; skipped = {}; volunteered = {}; swaps = {};
   }
 }
 
 async function save(key, data) {
   const keyMap = {
     'rega-records': 'records', 'rega-rain': 'rain',
-    'rega-skipped': 'skipped', 'rega-volunteered': 'volunteered'
+    'rega-skipped': 'skipped', 'rega-volunteered': 'volunteered',
+    'rega-swaps': 'swaps'
   };
   const mapped = keyMap[key];
   console.log('[Firebase] Tentando salvar:', mapped, data);
@@ -471,18 +475,21 @@ function startSync() {
     const newRain        = d.rain        || {};
     const newSkipped     = d.skipped     || {};
     const newVolunteered = d.volunteered || {};
+    const newSwaps       = d.swaps       || {};
 
     const changed =
       JSON.stringify(newRecords)     !== JSON.stringify(records)     ||
       JSON.stringify(newRain)        !== JSON.stringify(rainDays)    ||
       JSON.stringify(newSkipped)     !== JSON.stringify(skipped)     ||
-      JSON.stringify(newVolunteered) !== JSON.stringify(volunteered);
+      JSON.stringify(newVolunteered) !== JSON.stringify(volunteered) ||
+      JSON.stringify(newSwaps)       !== JSON.stringify(swaps);
 
     if (changed) {
       records     = newRecords;
       rainDays    = newRain;
       skipped     = newSkipped;
       volunteered = newVolunteered;
+      swaps       = newSwaps;
       renderCalendar();
       renderNextDay();
       showSyncToast();
@@ -628,8 +635,46 @@ function getResponsible(dateKey, sched) {
   const s = sched[dateKey];
   if (!s) return null;
   if (s.karina) return 'karina';
-  if (s.groupA) return s.groupA;
-  return null;
+  if (!s.groupA) return null;
+
+  const base = s.groupA; // responsável original do calendário
+
+  // Verifica se o responsável base tem um swap ativo:
+  // se cobriu alguém (coveredBy === base) e esse alguém ainda não regou,
+  // o slot passa para quem está devendo
+  const activeSwap = findActiveSwapFor(base, dateKey);
+  if (activeSwap) return activeSwap;
+
+  return base;
+}
+
+// Retorna o userId de quem está "devendo" uma rega para `userId`,
+// desde que ainda não tenha regado no seu slot de dívida.
+// Encadeia: se Flávio deve para Bruno, e Bruno deve para Simone,
+// o slot de Simone vai para Flávio (o devedor mais antigo pendente).
+function findActiveSwapFor(userId, afterDateKey) {
+  // Encontra swap onde coveredBy === userId e skippedBy ainda não regou
+  // no próximo slot que seria do userId
+  const pendingDebtors = Object.entries(swaps)
+    .filter(([swapDate, swap]) => {
+      if (swap.coveredBy !== userId) return false;
+      if (swapDate >= afterDateKey) return false; // swap é do futuro, não conta ainda
+      // Verifica se o devedor já regou depois do swap
+      const debtor = swap.skippedBy;
+      const hasRepaied = Object.entries(records).some(([recDate, rec]) => {
+        return recDate > swapDate && rec.by === debtor;
+      }) || Object.entries(volunteered).some(([volDate, vol]) => {
+        return volDate > swapDate && vol.by === debtor;
+      });
+      return !hasRepaied; // só conta se o devedor ainda não pagou
+    })
+    .sort(([a], [b]) => a.localeCompare(b)); // mais antigo primeiro
+
+  if (pendingDebtors.length === 0) return null;
+
+  // Retorna o devedor mais antigo pendente
+  const [, oldestSwap] = pendingDebtors[0];
+  return oldestSwap.skippedBy;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -886,9 +931,10 @@ function renderNextDay() {
     const resp = getResponsible(key, sched);
     if (resp !== currentUser.id) continue;
     if (records[key]) continue;
-    // Verifica chuva
-    const prevKey = toKey(addDays(d,-1));
-    if (rainDays[key] || rainDays[prevKey]) continue;
+    // Verifica chuva — pula se for dia de chuva ou um dos 2 dias de folga seguintes
+    const p1 = toKey(addDays(d,-1));
+    const p2 = toKey(addDays(d,-2));
+    if (rainDays[key] || rainDays[p1] || rainDays[p2]) continue;
     // Encontrou!
     const label = i === 0 ? 'Hoje é seu dia de regar! 💧' :
                   i === 1 ? 'Amanhã é seu dia de regar!' :
@@ -932,9 +978,10 @@ function renderCalendar() {
     const isToday   = toKey(d) === toKey(today);
     const isMyDay   = resp === currentUser.id;
     const isRain    = rainDays[key];
-    const prevKey   = toKey(addDays(d,-1));
-    const isAfterRain = rainDays[prevKey] && !isRain;
-    const noWater   = isRain || isAfterRain;
+    const prev1Key  = toKey(addDays(d,-1));
+    const prev2Key  = toKey(addDays(d,-2));
+    const isAfterRain = (rainDays[prev1Key] || rainDays[prev2Key]) && !isRain;
+    const noWater   = isRain || isAfterRain; // usado para lógica de remanejamento
     const watered   = records[key];
     const wasSkipped = skipped[key];
     const volunteerW = volunteered[key];
@@ -957,7 +1004,8 @@ function renderCalendar() {
     const ind = document.createElement('div');
     ind.className = 'cal-cell-indicator';
 
-    if (noWater) {
+    // Emoji 🌧️ apenas no dia marcado como chuva — dias seguintes ficam sem emoji
+    if (isRain) {
       ind.innerHTML = `<span class="emoji">🌧️</span>`;
     } else if (watered) {
       ind.innerHTML = `<span class="emoji">✅</span>`;
@@ -1012,8 +1060,9 @@ function openModal(key, d) {
   const resp     = getResponsible(key, sched);
   const respUser = resp ? getUserById(resp) : null;
   const isRain   = rainDays[key];
-  const prevKey  = toKey(addDays(d,-1));
-  const isAfterRain = rainDays[prevKey] && !isRain;
+  const prev1Key = toKey(addDays(d,-1));
+  const prev2Key = toKey(addDays(d,-2));
+  const isAfterRain = (rainDays[prev1Key] || rainDays[prev2Key]) && !isRain;
   const noWater  = isRain || isAfterRain;
   const watered  = records[key];
   const wasSkipped = skipped[key];
@@ -1032,10 +1081,10 @@ function openModal(key, d) {
   if (noWater) {
     html += `
       <div class="modal-info-box">
-        <div class="big-emoji">🌧️</div>
+        <div class="big-emoji">${isRain ? '🌧️' : '💧'}</div>
         <div>
           <div class="modal-info-title" style="color:#60a5fa">
-            ${isRain ? 'Chuva registrada' : 'Dia após chuva'}
+            ${isRain ? 'Chuva registrada' : 'Dia de folga após chuva'}
           </div>
           <div class="modal-info-sub">Não é necessário regar</div>
         </div>
@@ -1163,9 +1212,34 @@ async function undoSkip() {
 }
 
 async function confirmVolunteer() {
+  // Descobre quem era o responsável original do dia
+  const sched        = getScheduleFor(modalDate);
+  const originalResp = (() => {
+    const s = sched[modalKey];
+    if (!s) return null;
+    if (s.karina) return 'karina';
+    return s.groupA || null;
+  })();
+
+  // Registra o voluntário
   volunteered[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
   await save('rega-volunteered', volunteered);
-  showToast('🙋 Obrigado por se voluntariar!');
+
+  // Se o voluntário está cobrindo alguém do Grupo A (não a Karina),
+  // registra o swap para que o próximo slot do voluntário passe para o devedor
+  if (originalResp && originalResp !== 'karina' && originalResp !== currentUser.id) {
+    swaps[modalKey] = {
+      skippedBy: originalResp,
+      coveredBy: currentUser.id,
+      at: new Date().toISOString(),
+    };
+    await save('rega-swaps', swaps);
+    const debtorName = getUserById(originalResp)?.name || originalResp;
+    showToast(`🙋 Obrigado! O próximo slot de ${currentUser.name} passa para ${debtorName}.`);
+  } else {
+    showToast('🙋 Obrigado por se voluntariar!');
+  }
+
   document.getElementById('modal').style.display = 'none';
   renderCalendar();
   renderNextDay();
