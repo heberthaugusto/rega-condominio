@@ -156,9 +156,10 @@ jobs:
           let targetDate, tipoNotif;
 
           if (inputData) {
-            // Modo teste: data informada manualmente
+            // Modo teste: cria a data em horário de Brasília para evitar
+            // deslocamento de fuso (servidor GitHub Actions roda em UTC)
             const [y, m, d] = inputData.split('-').map(Number);
-            targetDate = new Date(y, m - 1, d);
+            targetDate = new Date(`${inputData}T12:00:00-03:00`);
             tipoNotif  = inputTipo === 'auto'
               ? (hour >= 19 ? 'vespera' : 'dia')
               : inputTipo;
@@ -170,7 +171,7 @@ jobs:
             targetDate = new Date(brNow);
             tipoNotif  = 'dia';
           }
-          targetDate.setHours(0,0,0,0);
+          targetDate.setHours(12,0,0,0);
 
           const isKarinaDay = karinaSundays.has(toKey(targetDate));
           const respA       = getResponsibleFor(targetDate);
