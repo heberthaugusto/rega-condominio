@@ -49,6 +49,12 @@ jobs:
           const https   = require('https');
           const webpush = require('web-push');
 
+          // Timeout global: mata o processo após 45s para não travar o workflow
+          setTimeout(() => {
+            console.error('Timeout global atingido — encerrando forçadamente');
+            process.exit(1);
+          }, 45000);
+
           // ── Configuração VAPID ──────────────────────────────────────────────
           webpush.setVapidDetails(
             'mailto:heberth@rega-condominio',
@@ -221,7 +227,8 @@ jobs:
                   hostname: 'oauth2.googleapis.com',
                   path: '/token',
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                  timeout: 10000,
                 }, res => {
                   let d = '';
                   res.on('data', c => d += c);
@@ -231,6 +238,7 @@ jobs:
                     else reject(new Error('Token error: ' + d));
                   });
                 });
+                req.on('timeout', () => { req.destroy(); reject(new Error('Timeout getAccessToken')); });
                 req.on('error', reject);
                 req.write(body);
                 req.end();
@@ -238,13 +246,15 @@ jobs:
             });
           }
 
+          // Timeout global de 10s em todas as requisições HTTP
           function httpsGet(hostname, path, headers) {
             return new Promise((resolve, reject) => {
-              const req = https.request({ hostname, path, method:'GET', headers }, res => {
+              const req = https.request({ hostname, path, method:'GET', headers, timeout: 10000 }, res => {
                 let d = '';
                 res.on('data', c => d += c);
                 res.on('end', () => resolve({ status: res.statusCode, body: d }));
               });
+              req.on('timeout', () => { req.destroy(); reject(new Error(`Timeout GET ${hostname}${path}`)); });
               req.on('error', reject);
               req.end();
             });
