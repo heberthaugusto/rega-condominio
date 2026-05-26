@@ -7,6 +7,20 @@ on:
     # 07h55 horário de Brasília = 10h55 UTC (lembrete no dia)
     - cron: '55 10 * * *'
   workflow_dispatch:
+    inputs:
+      data_teste:
+        description: 'Data para teste (YYYY-MM-DD). Vazio = hoje/amanhã automático.'
+        required: false
+        default: ''
+      tipo_teste:
+        description: 'Tipo de notificação'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - dia
+          - vespera
 
 jobs:
   notificar:
@@ -22,6 +36,8 @@ jobs:
           FIREBASE_PRIVATE_KEY:  ${{ secrets.FIREBASE_PRIVATE_KEY }}
           VAPID_PUBLIC_KEY:      "BJNUDISSu-_hn1c8VxcsV9I_8oePTVeiMoyFvetvxFeY3LQeNVAfxrBv3Gk7KzaSj_4Bo_H6BaNj8tAX57c9-ec"
           VAPID_PRIVATE_KEY:     ${{ secrets.VAPID_PRIVATE_KEY }}
+          INPUT_DATA_TESTE:      ${{ github.event.inputs.data_teste }}
+          INPUT_TIPO_TESTE:      ${{ github.event.inputs.tipo_teste }}
         run: |
           node << 'SCRIPT'
           const https    = require('https');
@@ -108,8 +124,21 @@ jobs:
           const brNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
           const hour  = brNow.getHours();
 
+          // Suporte a parâmetros manuais via workflow_dispatch
+          const inputData = process.env.INPUT_DATA_TESTE || '';
+          const inputTipo = process.env.INPUT_TIPO_TESTE || 'auto';
+
           let targetDate, tipoNotif;
-          if (hour >= 19) {
+
+          if (inputData) {
+            // Modo teste: data informada manualmente
+            const [y, m, d] = inputData.split('-').map(Number);
+            targetDate = new Date(y, m - 1, d);
+            tipoNotif  = inputTipo === 'auto'
+              ? (hour >= 19 ? 'vespera' : 'dia')
+              : inputTipo;
+            console.log(`[TESTE] Data manual: ${inputData} | Tipo: ${tipoNotif}`);
+          } else if (hour >= 19) {
             targetDate = addDays(brNow, 1);
             tipoNotif  = 'vespera';
           } else {
