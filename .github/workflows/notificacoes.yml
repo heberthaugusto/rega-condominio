@@ -26,8 +26,8 @@ jobs:
   notificar:
     runs-on: ubuntu-latest
     steps:
-      - name: Instalar dependências
-        run: npm install web-push google-auth-library
+      - name: Instalar dependência web-push
+        run: npm install web-push
 
       - name: Enviar notificações via Web Push nativo
         env:
@@ -170,18 +170,54 @@ jobs:
           console.log(`Responsável: ${nome} (${tipoNotif})`);
           console.log(`Título: ${titulo}`);
 
-          // ── Autenticação via google-auth-library (compatível com Node 22) ────
-          const { JWT } = require('google-auth-library');
+          // ── Autenticação manual JWT compatível com Node 22 / OpenSSL 3 ────────
+          // O Node 22 rejeita chaves PKCS#1 no crypto.createSign.
+          // Solução: usar crypto.createPrivateKey() para importar explicitamente
+          // a chave e assinar com o formato KeyObject, que o OpenSSL 3 aceita.
+          const { createPrivateKey, createSign } = require('crypto');
 
           async function getAccessToken() {
-            const client = new JWT({
-              email: CLIENT_EMAIL,
-              key:   PRIVATE_KEY,
-              scopes: ['https://www.googleapis.com/auth/datastore'],
+            return new Promise((resolve, reject) => {
+              try {
+                const now2   = Math.floor(Date.now() / 1000);
+                const header  = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+                const payload = Buffer.from(JSON.stringify({
+                  iss:   CLIENT_EMAIL,
+                  scope: 'https://www.googleapis.com/auth/datastore',
+                  aud:   'https://oauth2.googleapis.com/token',
+                  exp:   now2 + 3600,
+                  iat:   now2,
+                })).toString('base64url');
+
+                const signingInput = `${header}.${payload}`;
+
+                // createPrivateKey aceita PEM PKCS#1 e PKCS#8 no Node 22
+                const privateKeyObj = createPrivateKey({ key: PRIVATE_KEY, format: 'pem' });
+                const signer = createSign('RSA-SHA256');
+                signer.update(signingInput);
+                const sig = signer.sign(privateKeyObj, 'base64url');
+                const jwt = `${signingInput}.${sig}`;
+
+                const body = `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`;
+                const req  = https.request({
+                  hostname: 'oauth2.googleapis.com',
+                  path: '/token',
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+                }, res => {
+                  let d = '';
+                  res.on('data', c => d += c);
+                  res.on('end', () => {
+                    const parsed = JSON.parse(d);
+                    if (parsed.access_token) resolve(parsed.access_token);
+                    else reject(new Error('Token error: ' + d));
+                  });
+                });
+                req.on('error', reject);
+                req.write(body);
+                req.end();
+              } catch(e) { reject(e); }
             });
-            const token = await client.getAccessToken();
-            if (!token.token) throw new Error('Falha ao obter access token');
-            return token.token;
           }
 
           function httpsGet(hostname, path, headers) {
