@@ -372,13 +372,14 @@ window.__firebase_app_instance = _app;
 // ═══════════════════════════════════════════════════════
 // CONFIGURAÇÃO
 // ═══════════════════════════════════════════════════════
+// Senhas armazenadas como hashes SHA-256 — nunca em texto puro
 const USERS = [
-  { id: 'heberth', name: 'Heberth', password: 'haod123',   color: '#4ade80' },
-  { id: 'simone',  name: 'Simone',  password: 'simone123', color: '#60a5fa' },
-  { id: 'flavio',  name: 'Flávio',  password: 'f2026',     color: '#f97316' },
-  { id: 'bruno',   name: 'Bruno',   password: 'bru2026',   color: '#a78bfa' },
-  { id: 'luciano', name: 'Luciano', password: 'lu123',     color: '#fb7185' },
-  { id: 'karina',  name: 'Karina',  password: 'kmd2026',   color: '#fbbf24' },
+  { id: 'heberth', name: 'Heberth', passwordHash: 'db2a4e1358385f65fcdb1747589c322c8c657a9de9693a8419014bd1d3349df5', color: '#4ade80' },
+  { id: 'simone',  name: 'Simone',  passwordHash: '951e116844f077a7bc627254df2c5b2f2b540d3ff82cda6afa4b7203b50c516b', color: '#60a5fa' },
+  { id: 'flavio',  name: 'Flávio',  passwordHash: 'c75161c0b583736ee0f845aa587a24d7db8baec2d640962428f3b18fa6622d2e', color: '#f97316' },
+  { id: 'bruno',   name: 'Bruno',   passwordHash: '07e15c0073810c825953b1dbb7a2c085624b67d2e3f4a36780a6546d3d53b3aa', color: '#a78bfa' },
+  { id: 'luciano', name: 'Luciano', passwordHash: 'bf81eff9dda8005ff2bc44366f8b7d5faeafc975db94608e50bcae05e9df7264', color: '#fb7185' },
+  { id: 'karina',  name: 'Karina',  passwordHash: '40f9644c963231ccddd945fe64f5cce4a8d98c54504b3dbdb6568fef5a3a3e10', color: '#fbbf24' },
 ];
 
 // Grupo A: âncora = Simone em 21/05/2026
@@ -803,11 +804,16 @@ function selectUser(userId) {
   document.getElementById('password-input').focus();
 }
 
-function doLogin() {
+async function doLogin() {
   if (!selectedUserId) return;
   const u = getUserById(selectedUserId);
-  const pass = document.getElementById('password-input').value;
-  if (pass === u.password) {
+  const passRaw = document.getElementById('password-input').value;
+  // Compara hash SHA-256 da senha digitada com o hash armazenado
+  const encoder = new TextEncoder();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(passRaw));
+  const hashArray  = Array.from(new Uint8Array(hashBuffer));
+  const hashHex    = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  if (hashHex === u.passwordHash) {
     currentUser = u;
     localStorage.setItem('rega_logged_user', u.id);
     showApp();
