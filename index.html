@@ -624,10 +624,9 @@ function buildSchedule(fromDate, toDate) {
 }
 
 function getScheduleFor(d) {
-  const from = new Date(d.getFullYear(), d.getMonth(), 1);
-  const to   = new Date(d.getFullYear(), d.getMonth()+1, 0);
-  // Precisamos de um range maior para calcular corretamente a partir do início
-  const bigFrom = new Date(2026, 4, 17); // começa com START_K para incluir Karina desde o início
+  // Gera 3 meses à frente para garantir que swaps encontrem o próximo slot do coveredBy
+  const to      = new Date(d.getFullYear(), d.getMonth()+3, 0);
+  const bigFrom = new Date(2026, 4, 17);
   return buildSchedule(bigFrom, to);
 }
 
@@ -637,44 +636,29 @@ function getResponsible(dateKey, sched) {
   if (s.karina) return 'karina';
   if (!s.groupA) return null;
 
-  const base = s.groupA; // responsável original do calendário
+  const base = s.groupA;
 
-  // Verifica se o responsável base tem um swap ativo:
-  // se cobriu alguém (coveredBy === base) e esse alguém ainda não regou,
-  // o slot passa para quem está devendo
-  const activeSwap = findActiveSwapFor(base, dateKey);
-  if (activeSwap) return activeSwap;
+  // Verifica se este slot é o PRÓXIMO slot do coveredBy após um swap
+  // Se sim, passa para o skippedBy (pessoa que foi coberta)
+  for (const [swapDate, swap] of Object.entries(swaps)) {
+    if (swap.coveredBy !== base) continue;
+    if (swapDate >= dateKey) continue;
+    // Este é o próximo slot do coveredBy após o swap?
+    const isNextSlot = isNextSlotAfterSwap(swap.coveredBy, swapDate, dateKey, sched);
+    if (isNextSlot) return swap.skippedBy;
+  }
 
   return base;
 }
 
-// Retorna o userId de quem está "devendo" uma rega para `userId`,
-// desde que ainda não tenha regado no seu slot de dívida.
-// Encadeia: se Flávio deve para Bruno, e Bruno deve para Simone,
-// o slot de Simone vai para Flávio (o devedor mais antigo pendente).
-function findActiveSwapFor(userId, afterDateKey) {
-  // Encontra swap onde coveredBy === userId e skippedBy ainda não regou
-  // no próximo slot que seria do userId
-  const pendingDebtors = Object.entries(swaps)
-    .filter(([swapDate, swap]) => {
-      if (swap.coveredBy !== userId) return false;
-      if (swapDate >= afterDateKey) return false; // swap é do futuro, não conta ainda
-      // Verifica se o devedor já regou depois do swap
-      const debtor = swap.skippedBy;
-      const hasRepaied = Object.entries(records).some(([recDate, rec]) => {
-        return recDate > swapDate && rec.by === debtor;
-      }) || Object.entries(volunteered).some(([volDate, vol]) => {
-        return volDate > swapDate && vol.by === debtor;
-      });
-      return !hasRepaied; // só conta se o devedor ainda não pagou
-    })
-    .sort(([a], [b]) => a.localeCompare(b)); // mais antigo primeiro
-
-  if (pendingDebtors.length === 0) return null;
-
-  // Retorna o devedor mais antigo pendente
-  const [, oldestSwap] = pendingDebtors[0];
-  return oldestSwap.skippedBy;
+// Verifica se dateKey é o próximo slot de userId após swapDate no calendário base
+function isNextSlotAfterSwap(userId, swapDate, dateKey, sched) {
+  // Percorre o calendário base procurando o próximo slot do userId após swapDate
+  const entries = Object.entries(sched)
+    .filter(([d, s]) => s.groupA === userId && d > swapDate)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return false;
+  return entries[0][0] === dateKey;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1156,8 +1140,10 @@ function openModal(key, d) {
     html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">🙋 Eu reguei no lugar!</button>`;
   }
 
-  // Desfazer voluntário: só quem se voluntariou pode desfazer, e apenas se não regou
-  if (volunteerW && volunteerW.by === currentUser.id && !watered) {
+  // Desfazer voluntário: quem se voluntariou pode desfazer (antes de confirmar rega)
+  const iAmVolunteer = volunteerW && volunteerW.by === currentUser.id;
+  const iAmCoveredBy = swaps[key] && swaps[key].coveredBy === currentUser.id;
+  if ((iAmVolunteer || iAmCoveredBy) && !watered) {
     html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoVolunteer()">↩️ Desfazer voluntariado</button>`;
   }
 
@@ -1217,21 +1203,15 @@ async function undoSkip() {
 }
 
 async function confirmVolunteer() {
-  // Descobre quem era o responsável original do dia
+  // Responsável original do calendário base (sem swaps)
   const sched        = getScheduleFor(modalDate);
-  const originalResp = (() => {
-    const s = sched[modalKey];
-    if (!s) return null;
-    if (s.karina) return 'karina';
-    return s.groupA || null;
-  })();
+  const originalResp = sched[modalKey]?.groupA || null;
 
   // Registra o voluntário
   volunteered[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
   await save('rega-volunteered', volunteered);
 
-  // Se o voluntário está cobrindo alguém do Grupo A (não a Karina),
-  // registra o swap para que o próximo slot do voluntário passe para o devedor
+  // Registra swap: próximo slot do voluntário passa para quem foi coberto
   if (originalResp && originalResp !== 'karina' && originalResp !== currentUser.id) {
     swaps[modalKey] = {
       skippedBy: originalResp,
@@ -1239,8 +1219,8 @@ async function confirmVolunteer() {
       at: new Date().toISOString(),
     };
     await save('rega-swaps', swaps);
-    const debtorName = getUserById(originalResp)?.name || originalResp;
-    showToast(`🙋 Obrigado! O próximo slot de ${currentUser.name} passa para ${debtorName}.`);
+    const skippedName = getUserById(originalResp)?.name || originalResp;
+    showToast(`🙋 Obrigado! ${skippedName} assume o próximo dia de ${currentUser.name}.`);
   } else {
     showToast('🙋 Obrigado por se voluntariar!');
   }
