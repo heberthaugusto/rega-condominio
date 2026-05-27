@@ -325,23 +325,19 @@ jobs:
             } catch(e) { return { swaps: {}, records: {}, volunteered: {} }; }
           }
 
-          // Aplica swaps: se o responsável base cobriu alguém que ainda não regou,
-          // o slot passa para o devedor (mesma lógica do app)
-          function applySwap(baseResponsavel, dateKey, swaps, records, volunteered) {
-            const pendingDebtors = Object.entries(swaps)
-              .filter(([swapDate, swap]) => {
-                if (swap.coveredBy !== baseResponsavel) return false;
-                if (swapDate >= dateKey) return false;
-                const debtor = swap.skippedBy;
-                const hasRepaid =
-                  Object.entries(records).some(([d, r]) => d > swapDate && r.by === debtor) ||
-                  Object.entries(volunteered).some(([d, v]) => d > swapDate && v.by === debtor);
-                return !hasRepaid;
-              })
-              .sort(([a], [b]) => a.localeCompare(b));
-
-            if (pendingDebtors.length === 0) return baseResponsavel;
-            return pendingDebtors[0][1].skippedBy;
+          // Aplica swap: se este slot é o PRÓXIMO slot do coveredBy após o swap,
+          // passa para o skippedBy (pessoa que foi coberta)
+          function applySwap(baseResponsavel, dateKey, swaps, sched) {
+            for (const [swapDate, swap] of Object.entries(swaps)) {
+              if (swap.coveredBy !== baseResponsavel) continue;
+              if (swapDate >= dateKey) continue;
+              // Verifica se dateKey é o próximo slot do coveredBy após swapDate
+              const nextSlot = Object.keys(sched)
+                .filter(d => sched[d] === baseResponsavel && d > swapDate)
+                .sort()[0];
+              if (nextSlot === dateKey) return swap.skippedBy;
+            }
+            return baseResponsavel;
           }
 
           (async () => {
@@ -358,9 +354,21 @@ jobs:
               // Busca swaps/records do Firestore para calcular responsável real
               const { swaps, records, volunteered } = await getDados(accessToken);
               const targetKey  = toKey(targetDate);
+              // Monta mapa simples { 'YYYY-MM-DD': userId } para 6 meses
+              const sched = {};
+              let schedCur = new Date(START_A);
+              let schedIdx = 0;
+              const schedEnd = addDays(targetDate, 180);
+              while (schedCur <= schedEnd) {
+                schedCur = nextValid(schedCur);
+                sched[toKey(schedCur)] = GROUP_A[schedIdx % GROUP_A.length];
+                schedIdx++;
+                schedCur = addDays(schedCur, 3);
+              }
+
               const responsavelFinal = responsavel === 'karina'
                 ? 'karina'
-                : applySwap(responsavel, targetKey, swaps, records, volunteered);
+                : applySwap(responsavel, targetKey, swaps, sched);
 
               if (responsavelFinal !== responsavel) {
                 console.log(`Swap ativo: ${responsavel} → ${responsavelFinal}`);
