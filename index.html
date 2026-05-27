@@ -1053,6 +1053,7 @@ function openModal(key, d) {
   const volunteerW = volunteered[key];
   const isMyDay  = resp === currentUser.id;
   const isPast   = d <= todayD();
+  const isFuture = d > todayD();
   const wateredBy  = watered    ? getUserById(watered.by)    : null;
   const volunteerBy = volunteerW ? getUserById(volunteerW.by) : null;
 
@@ -1068,7 +1069,7 @@ function openModal(key, d) {
         <div class="big-emoji">${isRain ? '🌧️' : '💧'}</div>
         <div>
           <div class="modal-info-title" style="color:#60a5fa">
-            ${isRain ? 'Chuva registrada' : 'Dia de folga após chuva'}
+            ${isRain ? (isFuture ? 'Chuva prevista' : 'Chuva registrada') : 'Dia de folga após chuva'}
           </div>
           <div class="modal-info-sub">Não é necessário regar</div>
         </div>
@@ -1090,25 +1091,25 @@ function openModal(key, d) {
     html += `<div class="modal-info-box" style="justify-content:center;color:#4a6a4a">Dia sem rega programada</div>`;
   }
 
-  // Registros existentes
+  // Registros existentes — verbos conjugados conforme passado ou futuro
   if (watered) {
     html += `<div class="modal-record" style="background:#4ade8015;border:1px solid #4ade8033">
       <div class="rec-emoji">✅</div>
-      <div><div class="rec-title" style="color:#4ade80">Regado!</div>
-      <div class="rec-sub">por ${wateredBy?.name || '?'}</div></div>
+      <div><div class="rec-title" style="color:#4ade80">${isFuture ? 'Vai regar' : 'Regado!'}</div>
+      <div class="rec-sub">${isFuture ? 'previsto para' : 'por'} ${wateredBy?.name || '?'}</div></div>
     </div>`;
   }
   if (volunteerW) {
     html += `<div class="modal-record" style="background:#60a5fa15;border:1px solid #60a5fa33">
       <div class="rec-emoji">🙋</div>
-      <div><div class="rec-title" style="color:#60a5fa">Voluntário regou</div>
-      <div class="rec-sub">por ${volunteerBy?.name || '?'}</div></div>
+      <div><div class="rec-title" style="color:#60a5fa">${isFuture ? 'Voluntário vai regar' : 'Voluntário regou'}</div>
+      <div class="rec-sub">${isFuture ? 'previsto para' : 'por'} ${volunteerBy?.name || '?'}</div></div>
     </div>`;
   }
   if (wasSkipped) {
     html += `<div class="modal-record" style="background:#fb718515;border:1px solid #fb718533">
       <div class="rec-emoji">⏭️</div>
-      <div><div class="rec-title" style="color:#fb7185">Não pôde regar</div></div>
+      <div><div class="rec-title" style="color:#fb7185">${isFuture ? 'Não poderá regar' : 'Não pôde regar'}</div></div>
     </div>`;
   }
 
@@ -1127,7 +1128,7 @@ function openModal(key, d) {
 
   // Não pôde: só o responsável, só se não regou e não pulou
   if (!noWater && isMyDay && !watered && !wasSkipped) {
-    html += `<button class="action-btn-outline" style="border:1px solid #fb718544;color:#fb7185" onclick="confirmSkip()">😔 Não consegui regar</button>`;
+    html += `<button class="action-btn-outline" style="border:1px solid #fb718544;color:#fb7185" onclick="confirmSkip()">${isFuture ? '😔 Não poderei regar' : '😔 Não consegui regar'}</button>`;
   }
 
   // Desfazer "não pôde": só quem registrou pode desfazer
@@ -1137,7 +1138,7 @@ function openModal(key, d) {
 
   // Voluntário: qualquer um que não seja o responsável, se foi pulado e não regado
   if (!noWater && respUser && wasSkipped && !watered && !volunteerW && !isMyDay) {
-    html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">🙋 Eu reguei no lugar!</button>`;
+    html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">${isFuture ? '🙋 Eu vou regar no lugar!' : '🙋 Eu reguei no lugar!'}</button>`;
   }
 
   // Desfazer voluntário: quem se voluntariou pode desfazer (antes de confirmar rega)
@@ -1149,7 +1150,7 @@ function openModal(key, d) {
 
   // Registrar chuva: qualquer um, se ainda não registrou
   if (!isRain) {
-    html += `<button class="action-btn-outline" style="border:1px solid #60a5fa44;color:#60a5fa" onclick="confirmRain()">🌧️ Choveu neste dia</button>`;
+    html += `<button class="action-btn-outline" style="border:1px solid #60a5fa44;color:#60a5fa" onclick="confirmRain()">${isFuture ? '🌧️ Vai chover neste dia' : '🌧️ Choveu neste dia'}</button>`;
   }
 
   html += `<button class="action-btn-close" onclick="closeModal()">Fechar</button>`;
