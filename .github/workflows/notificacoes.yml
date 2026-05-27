@@ -2,10 +2,10 @@ name: Notificações de Rega
 
 on:
   schedule:
-    # 19h55 horário de Brasília = 22h55 UTC (lembrete véspera)
-    - cron: '55 22 * * *'
-    # 07h55 horário de Brasília = 10h55 UTC (lembrete no dia)
-    - cron: '55 10 * * *'
+    # 20h00 horário de Brasília = 23h00 UTC (lembrete véspera — dia anterior à rega)
+    - cron: '0 23 * * *'
+    # 08h00 horário de Brasília = 11h00 UTC (lembrete no dia da rega)
+    - cron: '0 11 * * *'
   workflow_dispatch:
     inputs:
       data_teste:
@@ -161,10 +161,10 @@ jobs:
             const [y, m, d] = inputData.split('-').map(Number);
             targetDate = new Date(`${inputData}T12:00:00-03:00`);
             tipoNotif  = inputTipo === 'auto'
-              ? (hour >= 19 ? 'vespera' : 'dia')
+              ? (hour >= 20 ? 'vespera' : 'dia')
               : inputTipo;
             console.log(`[TESTE] Data manual: ${inputData} | Tipo: ${tipoNotif}`);
-          } else if (hour >= 19) {
+          } else if (hour >= 20) {
             targetDate = addDays(brNow, 1);
             tipoNotif  = 'vespera';
           } else {
