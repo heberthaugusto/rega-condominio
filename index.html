@@ -410,7 +410,7 @@ const getUserById = id => USERS.find(u => u.id === id);
 // ═══════════════════════════════════════════════════════
 let currentUser   = null;
 let selectedUserId = null;
-let currentMonth  = new Date(2026, 4, 1);
+let currentMonth  = new Date(new Date().getFullYear(), new Date().getMonth(), 1); // mês vigente
 let records    = {}; // { 'YYYY-MM-DD': { by, at } }
 let rainDays   = {}; // { 'YYYY-MM-DD': true }
 let skipped    = {}; // { 'YYYY-MM-DD': { by, at } }
@@ -1051,7 +1051,10 @@ function openModal(key, d) {
   const watered  = records[key];
   const wasSkipped = skipped[key];
   const volunteerW = volunteered[key];
-  const isMyDay  = resp === currentUser.id;
+  const isMyDay      = resp === currentUser.id;
+  // Voluntário que cobriu este dia também pode confirmar a rega
+  const isIVolunteer = volunteerW && volunteerW.by === currentUser.id;
+  const canConfirm   = isMyDay || isIVolunteer;
   const isPast   = d <= todayD();
   const isFuture = d > todayD();
   const wateredBy  = watered    ? getUserById(watered.by)    : null;
@@ -1117,17 +1120,17 @@ function openModal(key, d) {
   html += `<div class="modal-actions">`;
 
   // Confirmar rega: responsável no dia (passado ou hoje), ou qualquer um se foi pulado
-  if (!noWater && respUser && !watered && isPast && isMyDay) {
+  if (!noWater && respUser && !watered && isPast && canConfirm) {
     html += `<button class="action-btn" style="background:#4ade80;color:#0f1a0f" onclick="confirmWatered()">💧 Confirmei que reguei!</button>`;
   }
 
-  // Desfazer rega: só quem registrou pode desfazer
-  if (watered && watered.by === currentUser.id) {
+  // Desfazer rega: quem registrou ou o voluntário do dia pode desfazer
+  if (watered && (watered.by === currentUser.id || isIVolunteer)) {
     html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoWatered()">↩️ Desfazer registro de rega</button>`;
   }
 
   // Não pôde: só o responsável, só se não regou e não pulou
-  if (!noWater && isMyDay && !watered && !wasSkipped) {
+  if (!noWater && canConfirm && !watered && !wasSkipped) {
     html += `<button class="action-btn-outline" style="border:1px solid #fb718544;color:#fb7185" onclick="confirmSkip()">${isFuture ? '😔 Não poderei regar' : '😔 Não consegui regar'}</button>`;
   }
 
