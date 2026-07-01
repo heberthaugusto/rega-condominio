@@ -788,23 +788,51 @@ async function requestNotif() {
   await initPush();
 }
 
-function checkNotifButton() {
-  const granted  = isPushSupported() && Notification.permission === 'granted';
+// Verifica se existe uma subscription push realmente ativa no navegador.
+// Isso é diferente de Notification.permission === 'granted', que só diz que
+// o usuário já decidiu — não garante que a subscription ainda é válida
+// (ela pode ter sido perdida em reinstalação, limpeza de dados, etc).
+async function hasActivePushSubscription() {
+  if (!isPushSupported()) return false;
+  try {
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return false;
+    const sub = await reg.pushManager.getSubscription();
+    return !!sub;
+  } catch(e) {
+    return false;
+  }
+}
+
+async function checkNotifButton() {
+  const permissionGranted = isPushSupported() && Notification.permission === 'granted';
   const iosNoApp = isIOS() && !isStandalone();
-
-  // Botão no header (pós-login)
-  const btn = document.getElementById('notif-btn');
-  if (btn) {
-    if (!isPushSupported() && !iosNoApp) { btn.style.display = 'none'; }
-    else if (granted)                    { btn.style.display = 'none'; }
-    else                                 { btn.style.display = 'flex'; }
-  }
-
-  // Botão na tela de login (pré-login) — esconde após permissão concedida
+  const btn      = document.getElementById('notif-btn');
   const loginBtn = document.getElementById('notif-login-btn');
-  if (loginBtn) {
-    loginBtn.style.display = (granted || iosNoApp || !isPushSupported()) ? 'none' : 'block';
+
+  if (!isPushSupported() && !iosNoApp) {
+    if (btn) btn.style.display = 'none';
+    if (loginBtn) loginBtn.style.display = 'none';
+    return;
   }
+
+  if (iosNoApp) {
+    if (btn) btn.style.display = 'flex';
+    if (loginBtn) loginBtn.style.display = 'block';
+    return;
+  }
+
+  if (!permissionGranted) {
+    // Ainda não decidiu — mostra os botões normalmente
+    if (btn) btn.style.display = 'flex';
+    if (loginBtn) loginBtn.style.display = 'block';
+    return;
+  }
+
+  // Permissão concedida — verifica se a subscription REAL ainda existe
+  const hasSub = await hasActivePushSubscription();
+  if (btn)      btn.style.display      = hasSub ? 'none'  : 'flex';
+  if (loginBtn) loginBtn.style.display = hasSub ? 'none'  : 'block';
 }
 
 // ═══════════════════════════════════════════════════════
