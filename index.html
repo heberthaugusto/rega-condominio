@@ -350,7 +350,7 @@
 // FIREBASE
 // ═══════════════════════════════════════════════════════
 import { initializeApp }                                          from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot }         from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js';
+import { getFirestore, doc, getDoc, setDoc, onSnapshot, deleteField } from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js';
 // firebase-messaging não é suportado no Safari/iOS — importado de forma lazy apenas quando necessário
 
 const firebaseConfig = {
@@ -439,6 +439,19 @@ async function loadAll() {
   } catch(e) {
     console.warn('[Firebase] loadAll error:', e);
     records = {}; rainDays = {}; skipped = {}; volunteered = {}; swaps = {};
+  }
+}
+
+// Remove campos específicos do Firestore usando deleteField + dot notation
+// Isso garante remoção real dos campos, diferente de salvar {} com merge:true
+async function saveDelete(fields) {
+  // fields = { 'volunteered.2026-07-15': deleteField(), ... }
+  try {
+    const { updateDoc } = await import('https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js');
+    await updateDoc(doc(db, 'rega', 'dados'), fields);
+  } catch(e) {
+    console.error('[saveDelete] Erro:', e);
+    throw e;
   }
 }
 
@@ -1181,12 +1194,14 @@ async function confirmWatered() {
 }
 
 async function undoWatered() {
-  delete records[modalKey];
-  await save('rega-records', records);
-  showToast('↩️ Registro de rega desfeito');
-  document.getElementById('modal').style.display = 'none';
-  renderCalendar();
-  renderNextDay();
+  try {
+    delete records[modalKey];
+    await saveDelete({ [`records.${modalKey}`]: deleteField() });
+    showToast('↩️ Registro de rega desfeito');
+    document.getElementById('modal').style.display = 'none';
+    renderCalendar();
+    renderNextDay();
+  } catch(e) { showToast('❌ Erro ao desfazer: ' + e.message); }
 }
 
 async function confirmSkip() {
@@ -1198,12 +1213,14 @@ async function confirmSkip() {
 }
 
 async function undoSkip() {
-  delete skipped[modalKey];
-  await save('rega-skipped', skipped);
-  showToast('↩️ Registro desfeito');
-  document.getElementById('modal').style.display = 'none';
-  renderCalendar();
-  renderNextDay();
+  try {
+    delete skipped[modalKey];
+    await saveDelete({ [`skipped.${modalKey}`]: deleteField() });
+    showToast('↩️ Registro desfeito');
+    document.getElementById('modal').style.display = 'none';
+    renderCalendar();
+    renderNextDay();
+  } catch(e) { showToast('❌ Erro ao desfazer: ' + e.message); }
 }
 
 async function confirmVolunteer() {
@@ -1249,25 +1266,42 @@ async function undoVolunteer() {
 
 // Desfaz tudo de uma vez: rega confirmada + voluntariado + swap
 async function undoVolunteerAll() {
-  // Remove rega confirmada se existir
-  if (records[modalKey] && records[modalKey].by === currentUser.id) {
-    delete records[modalKey];
-    await save('rega-records', records);
+  try {
+    const ref = doc(db, 'rega', 'dados');
+
+    // Monta um único setDoc que remove todos os campos de uma vez
+    // usando deleteField() — a única forma garantida de remover campos no Firestore
+    const updates = {};
+
+    if (records[modalKey] && records[modalKey].by === currentUser.id) {
+      updates[`records.${modalKey}`] = deleteField();
+      delete records[modalKey];
+    }
+
+    if (volunteered[modalKey]) {
+      updates[`volunteered.${modalKey}`] = deleteField();
+      delete volunteered[modalKey];
+    }
+
+    if (swaps[modalKey] && swaps[modalKey].coveredBy === currentUser.id) {
+      updates[`swaps.${modalKey}`] = deleteField();
+      delete swaps[modalKey];
+    }
+
+    if (Object.keys(updates).length > 0) {
+      // updateDoc com dot notation remove campos específicos sem afetar o resto
+      const { updateDoc } = await import('https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js');
+      await updateDoc(ref, updates);
+    }
+
+    showToast('↩️ Voluntariado desfeito');
+    document.getElementById('modal').style.display = 'none';
+    renderCalendar();
+    renderNextDay();
+  } catch(e) {
+    console.error('[undoVolunteerAll] Erro:', e);
+    showToast('❌ Erro ao desfazer: ' + e.message);
   }
-  // Remove voluntariado
-  if (volunteered[modalKey]) {
-    delete volunteered[modalKey];
-    await save('rega-volunteered', volunteered);
-  }
-  // Remove swap
-  if (swaps[modalKey] && swaps[modalKey].coveredBy === currentUser.id) {
-    delete swaps[modalKey];
-    await save('rega-swaps', swaps);
-  }
-  showToast('↩️ Voluntariado e rega desfeitos');
-  document.getElementById('modal').style.display = 'none';
-  renderCalendar();
-  renderNextDay();
 }
 
 async function confirmRain() {
@@ -1280,11 +1314,12 @@ async function confirmRain() {
 }
 
 async function removeRain(key) {
-  delete rainDays[key];
-  await save('rega-rain', rainDays);
-  showToast('☀️ Registro de chuva removido');
-  document.getElementById('modal').style.display = 'none';
-  renderCalendar();
+  try {
+    delete rainDays[key];
+    await saveDelete({ [`rain.${key}`]: deleteField() });
+    showToast('☀️ Registro de chuva removido');
+    document.getElementById('modal').style.display = 'none';
+    renderCalendar();
   renderNextDay();
 }
 
