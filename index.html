@@ -1124,31 +1124,31 @@ function openModal(key, d) {
     html += `<button class="action-btn" style="background:#4ade80;color:#0f1a0f" onclick="confirmWatered()">💧 Confirmei que reguei!</button>`;
   }
 
-  // Desfazer rega: quem registrou ou o voluntário do dia pode desfazer
-  if (watered && (watered.by === currentUser.id || isIVolunteer)) {
+  // Desfazer voluntariado — botão único que cancela tudo (rega + voluntariado + swap)
+  const iAmVolunteer = volunteerW && volunteerW.by === currentUser.id;
+  const iAmCoveredBy = swaps[key] && swaps[key].coveredBy === currentUser.id;
+  if (iAmVolunteer || iAmCoveredBy) {
+    html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoVolunteerAll()">↩️ Desfazer voluntariado</button>`;
+  }
+
+  // Desfazer rega: só para quem é responsável original do dia (não voluntário)
+  if (watered && watered.by === currentUser.id && !iAmVolunteer && !iAmCoveredBy) {
     html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoWatered()">↩️ Desfazer registro de rega</button>`;
   }
 
-  // Não pôde: só o responsável, só se não regou e não pulou
-  if (!noWater && canConfirm && !watered && !wasSkipped) {
+  // Não pôde: só o responsável original, não o voluntário
+  if (!noWater && canConfirm && !watered && !wasSkipped && !isIVolunteer) {
     html += `<button class="action-btn-outline" style="border:1px solid #fb718544;color:#fb7185" onclick="confirmSkip()">${isFuture ? '😔 Não poderei regar' : '😔 Não consegui regar'}</button>`;
   }
 
-  // Desfazer "não pôde": só quem registrou pode desfazer
+  // Desfazer "não pôde": só quem registrou
   if (wasSkipped && wasSkipped.by === currentUser.id && !watered) {
-    html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoSkip()">↩️ Desfazer "não consegui regar"</button>`;
+    html += `<button class="action-btn-outline" style="border:1px solid #4ade8044;color:#4ade80" onclick="undoSkip()">↩️ Desfazer "não consegui regar"</button>`;
   }
 
-  // Voluntário: qualquer um que não seja o responsável, se foi pulado e não regado
-  if (!noWater && respUser && wasSkipped && !watered && !volunteerW && !isMyDay) {
+  // Voluntário: qualquer um que não seja o responsável do dia
+  if (!noWater && respUser && !watered && !volunteerW && !isMyDay) {
     html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">${isFuture ? '🙋 Eu vou regar no lugar!' : '🙋 Eu reguei no lugar!'}</button>`;
-  }
-
-  // Desfazer voluntário: quem se voluntariou pode desfazer (antes de confirmar rega)
-  const iAmVolunteer = volunteerW && volunteerW.by === currentUser.id;
-  const iAmCoveredBy = swaps[key] && swaps[key].coveredBy === currentUser.id;
-  if ((iAmVolunteer || iAmCoveredBy) && !watered) {
-    html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoVolunteer()">↩️ Desfazer voluntariado</button>`;
   }
 
   // Registrar chuva: qualquer um, se ainda não registrou
@@ -1235,17 +1235,36 @@ async function confirmVolunteer() {
 }
 
 async function undoVolunteer() {
-  // Remove o voluntariado
   delete volunteered[modalKey];
   await save('rega-volunteered', volunteered);
-
-  // Remove o swap associado a este voluntariado (se existir)
   if (swaps[modalKey] && swaps[modalKey].coveredBy === currentUser.id) {
     delete swaps[modalKey];
     await save('rega-swaps', swaps);
   }
-
   showToast('↩️ Voluntariado desfeito');
+  document.getElementById('modal').style.display = 'none';
+  renderCalendar();
+  renderNextDay();
+}
+
+// Desfaz tudo de uma vez: rega confirmada + voluntariado + swap
+async function undoVolunteerAll() {
+  // Remove rega confirmada se existir
+  if (records[modalKey] && records[modalKey].by === currentUser.id) {
+    delete records[modalKey];
+    await save('rega-records', records);
+  }
+  // Remove voluntariado
+  if (volunteered[modalKey]) {
+    delete volunteered[modalKey];
+    await save('rega-volunteered', volunteered);
+  }
+  // Remove swap
+  if (swaps[modalKey] && swaps[modalKey].coveredBy === currentUser.id) {
+    delete swaps[modalKey];
+    await save('rega-swaps', swaps);
+  }
+  showToast('↩️ Voluntariado e rega desfeitos');
   document.getElementById('modal').style.display = 'none';
   renderCalendar();
   renderNextDay();
@@ -1397,7 +1416,8 @@ window.undoWatered    = undoWatered;
 window.confirmSkip    = confirmSkip;
 window.undoSkip       = undoSkip;
 window.confirmVolunteer = confirmVolunteer;
-window.undoVolunteer  = undoVolunteer;
+window.undoVolunteer    = undoVolunteer;
+window.undoVolunteerAll = undoVolunteerAll;
 window.confirmRain    = confirmRain;
 window.removeRain     = removeRain;
 window.doUpdate       = doUpdate;
