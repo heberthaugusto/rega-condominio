@@ -321,23 +321,51 @@ jobs:
                 volunteered[date] = { by: m.by?.stringValue };
               }
 
-              return { swaps, records, volunteered };
-            } catch(e) { return { swaps: {}, records: {}, volunteered: {} }; }
+              // Extrai rainDays: { 'YYYY-MM-DD': true }
+              // No Firestore REST, boolean true vem como { booleanValue: true }
+              const rainRaw = fields.rain?.mapValue?.fields || {};
+              const rainDays = {};
+              for (const [date, val] of Object.entries(rainRaw)) {
+                // Aceita booleanValue true ou qualquer valor truthy (string 'true', etc)
+                if (val.booleanValue === true || val.stringValue === 'true' || val.nullValue === undefined && val.booleanValue) {
+                  rainDays[date] = true;
+                }
+              }
+
+              return { swaps, records, volunteered, rainDays };
+            } catch(e) { return { swaps: {}, records: {}, volunteered: {}, rainDays: {} }; }
           }
 
-          // Aplica swap: se este slot é o PRÓXIMO slot do coveredBy após o swap,
-          // passa para o skippedBy (pessoa que foi coberta)
-          function applySwap(baseResponsavel, dateKey, swaps, sched) {
-            for (const [swapDate, swap] of Object.entries(swaps)) {
-              if (swap.coveredBy !== baseResponsavel) continue;
-              if (swapDate >= dateKey) continue;
-              // Verifica se dateKey é o próximo slot do coveredBy após swapDate
-              const nextSlot = Object.keys(sched)
-                .filter(d => sched[d] === baseResponsavel && d > swapDate)
-                .sort()[0];
-              if (nextSlot === dateKey) return swap.skippedBy;
+          // Monta calendário real aplicando todos os swaps sobre o calendário base,
+          // exatamente como o app faz — retorna { 'YYYY-MM-DD': userId }
+          function buildRealSched(swaps, schedEnd) {
+            // 1. Calendário base
+            const base = {};
+            let cur = new Date(START_A), idx = 0;
+            while (cur <= schedEnd) {
+              cur = nextValid(cur);
+              base[toKey(cur)] = GROUP_A[idx % GROUP_A.length];
+              idx++;
+              cur = addDays(cur, 3);
             }
-            return baseResponsavel;
+
+            // 2. Aplica swaps em ordem cronológica
+            // Para cada swap: acha o próximo slot do coveredBy após o swapDate
+            // e troca para o skippedBy
+            const real = Object.assign({}, base);
+            const swapsSorted = Object.entries(swaps).sort(([a],[b]) => a.localeCompare(b));
+
+            for (const [swapDate, swap] of swapsSorted) {
+              // Próximo slot do coveredBy após o swap (no calendário REAL já modificado)
+              const nextSlot = Object.keys(real)
+                .filter(d => real[d] === swap.coveredBy && d > swapDate)
+                .sort()[0];
+              if (nextSlot) {
+                real[nextSlot] = swap.skippedBy;
+              }
+            }
+
+            return real;
           }
 
           (async () => {
@@ -351,27 +379,26 @@ jobs:
                 process.exit(0);
               }
 
-              // Busca swaps/records do Firestore para calcular responsável real
-              const { swaps, records, volunteered } = await getDados(accessToken);
+              // Busca swaps e chuvas do Firestore e monta calendário real
+              const { swaps, rainDays: rainDaysReal } = await getDados(accessToken);
+              // Atualiza rainDays global para que nextValid use os dados reais
+              Object.assign(rainDays, rainDaysReal);
+              console.log(`Dias de chuva registrados: ${Object.keys(rainDaysReal).length}`);
               const targetKey  = toKey(targetDate);
-              // Monta mapa simples { 'YYYY-MM-DD': userId } para 6 meses
-              const sched = {};
-              let schedCur = new Date(START_A);
-              let schedIdx = 0;
-              const schedEnd = addDays(targetDate, 180);
-              while (schedCur <= schedEnd) {
-                schedCur = nextValid(schedCur);
-                sched[toKey(schedCur)] = GROUP_A[schedIdx % GROUP_A.length];
-                schedIdx++;
-                schedCur = addDays(schedCur, 3);
-              }
+              const schedEnd   = addDays(targetDate, 180);
+              const realSched  = buildRealSched(swaps, schedEnd);
 
-              const responsavelFinal = responsavel === 'karina'
-                ? 'karina'
-                : applySwap(responsavel, targetKey, swaps, sched);
+              // Log dos próximos 10 dias para diagnóstico
+              console.log('--- Calendário real (próximos 10 slots) ---');
+              Object.keys(realSched).filter(d => d >= targetKey).sort().slice(0,10)
+                .forEach(d => console.log(d, realSched[d]));
+              console.log('---');
+
+              // Responsável real do dia alvo
+              const responsavelFinal = realSched[targetKey] || responsavel;
 
               if (responsavelFinal !== responsavel) {
-                console.log(`Swap ativo: ${responsavel} → ${responsavelFinal}`);
+                console.log(`Swap aplicado: ${responsavel} → ${responsavelFinal}`);
               }
 
               const nomeFinal = USER_NAMES[responsavelFinal] || nome;
