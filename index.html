@@ -1120,7 +1120,7 @@ function openModal(key, d) {
   html += `<div class="modal-actions">`;
 
   // Confirmar rega: responsável no dia (passado ou hoje), ou qualquer um se foi pulado
-  if (!noWater && respUser && !watered && isPast && canConfirm) {
+  if (!noWater && respUser && !watered && (isPast || isIVolunteer) && canConfirm) {
     html += `<button class="action-btn" style="background:#4ade80;color:#0f1a0f" onclick="confirmWatered()">💧 Confirmei que reguei!</button>`;
   }
 
@@ -1151,9 +1151,9 @@ function openModal(key, d) {
     html += `<button class="action-btn" style="background:#60a5fa;color:#0f1a0f" onclick="confirmVolunteer()">${isFuture ? '🙋 Eu vou regar no lugar!' : '🙋 Eu reguei no lugar!'}</button>`;
   }
 
-  // Registrar chuva: qualquer um, se ainda não registrou
-  if (!isRain) {
-    html += `<button class="action-btn-outline" style="border:1px solid #60a5fa44;color:#60a5fa" onclick="confirmRain()">${isFuture ? '🌧️ Vai chover neste dia' : '🌧️ Choveu neste dia'}</button>`;
+  // Registrar chuva: apenas no dia atual ou passado (não é possível prever)
+  if (!isRain && isPast) {
+    html += `<button class="action-btn-outline" style="border:1px solid #60a5fa44;color:#60a5fa" onclick="confirmRain()">🌧️ Choveu neste dia</button>`;
   }
 
   html += `<button class="action-btn-close" onclick="closeModal()">Fechar</button>`;
