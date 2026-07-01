@@ -734,8 +734,6 @@ async function initPush() {
 // Cria ou recupera a subscription e salva no Firestore
 async function completePushSubscription() {
   try {
-    // navigator.serviceWorker.ready é a forma mais compatível com iOS
-    // Não usamos wrapper customizado — evita timeout e condições de corrida
     const reg = await navigator.serviceWorker.ready;
 
     let sub = await reg.pushManager.getSubscription();
@@ -748,7 +746,6 @@ async function completePushSubscription() {
     }
 
     if (!currentUser) {
-      // Sem usuário logado ainda — subscription criada mas salva depois no showApp
       console.log('[Push] Permissão concedida, subscription aguarda login');
       checkNotifButton();
       return;
@@ -925,8 +922,6 @@ function showApp() {
   // Aguarda SW pronto e verifica botão
   navigator.serviceWorker.ready.then(async reg => {
     checkNotifButton();
-    // Se permissão já foi concedida antes do login, salva a subscription
-    // agora que sabemos qual usuário está logado
     if (isPushSupported() && Notification.permission === 'granted') {
       try {
         const sub = await reg.pushManager.getSubscription();
