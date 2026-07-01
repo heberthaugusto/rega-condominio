@@ -1316,7 +1316,10 @@ async function removeRain(key) {
     showToast('☀️ Registro de chuva removido');
     document.getElementById('modal').style.display = 'none';
     renderCalendar();
-  renderNextDay();
+    renderNextDay();
+  } catch(e) {
+    showToast('❌ Erro ao remover chuva: ' + e.message);
+  }
 }
 
 // ═══════════════════════════════════════════════════════
