@@ -350,7 +350,7 @@
 // FIREBASE
 // ═══════════════════════════════════════════════════════
 import { initializeApp }                                          from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js';
-import { getFirestore, doc, getDoc, setDoc, onSnapshot, deleteField } from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js';
+import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, deleteField } from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js';
 // firebase-messaging não é suportado no Safari/iOS — importado de forma lazy apenas quando necessário
 
 const firebaseConfig = {
@@ -445,9 +445,7 @@ async function loadAll() {
 // Remove campos específicos do Firestore usando deleteField + dot notation
 // Isso garante remoção real dos campos, diferente de salvar {} com merge:true
 async function saveDelete(fields) {
-  // fields = { 'volunteered.2026-07-15': deleteField(), ... }
   try {
-    const { updateDoc } = await import('https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js');
     await updateDoc(doc(db, 'rega', 'dados'), fields);
   } catch(e) {
     console.error('[saveDelete] Erro:', e);
@@ -1289,8 +1287,6 @@ async function undoVolunteerAll() {
     }
 
     if (Object.keys(updates).length > 0) {
-      // updateDoc com dot notation remove campos específicos sem afetar o resto
-      const { updateDoc } = await import('https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js');
       await updateDoc(ref, updates);
     }
 
