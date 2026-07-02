@@ -429,11 +429,11 @@ jobs:
               }
 
               const nomeFinal = USER_NAMES[responsavelFinal] || nome;
-              const tituloFinal  = tipoNotif === 'vespera'
-                ? `🌿 Amanhã é seu dia de regar!`
+              const tituloFinal = tipoNotif === 'vespera' ? `🌿 Amanhã é seu dia de regar!`
+                : tipoNotif === 'lembrete_marcar'         ? `📋 Não esqueça de marcar no app!`
                 : `💧 Hoje é seu dia de regar, ${nomeFinal}!`;
-              const mensagemFinal = tipoNotif === 'vespera'
-                ? `${nomeFinal}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
+              const mensagemFinal = tipoNotif === 'vespera' ? `${nomeFinal}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
+                : tipoNotif === 'lembrete_marcar'           ? `${nomeFinal}, você regou hoje (${dataStr})? Não esqueça de confirmar no app! 🌱`
                 : `Bom dia, ${nomeFinal}! Hoje (${dataStr}) é sua vez de molhar as plantas. Após regar, confirme no app! 🌱`;
 
               // Filtra apenas os dispositivos do responsável final (com swap aplicado)
