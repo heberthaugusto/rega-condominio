@@ -404,10 +404,13 @@ jobs:
               const realSched  = buildRealSched(swaps, schedEnd);
 
               // Lembrete final (20h05): só envia se a pessoa AINDA NÃO registrou nada hoje
+              // e se o dia não está dispensado por chuva
               if (tipoNotif === 'lembrete_marcar') {
                 const jaRegistrou = !!records[targetKey] || !!skipped[targetKey] || !!volunteered[targetKey];
-                if (jaRegistrou) {
-                  console.log(`${nome} já registrou algo em ${targetKey} — lembrete não enviado.`);
+                const isRainDay   = !!rainDaysReal[targetKey];
+                if (jaRegistrou || isRainDay) {
+                  const motivo = isRainDay ? 'dia de chuva' : 'já registrou algo';
+                  console.log(`${nome} — ${motivo} em ${targetKey} — lembrete não enviado.`);
                   process.exit(0);
                 }
               }
