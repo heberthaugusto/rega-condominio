@@ -2,10 +2,12 @@ name: Notificações de Rega
 
 on:
   schedule:
-    # 20h00 horário de Brasília = 23h00 UTC (lembrete véspera — dia anterior à rega)
-    - cron: '0 23 * * *'
     # 08h00 horário de Brasília = 11h00 UTC (lembrete no dia da rega)
     - cron: '0 11 * * *'
+    # 20h00 horário de Brasília = 23h00 UTC (lembrete véspera — dia anterior à rega)
+    - cron: '0 23 * * *'
+    # 20h05 horário de Brasília = 23h05 UTC (lembrete final — marcar rega no app hoje)
+    - cron: '5 23 * * *'
   workflow_dispatch:
     inputs:
       data_teste:
@@ -21,6 +23,7 @@ on:
           - auto
           - dia
           - vespera
+          - lembrete_marcar
 
 jobs:
   notificar:
@@ -145,9 +148,10 @@ jobs:
           }
 
           // ── Determina responsável do dia ─────────────────────────────────────
-          const now   = new Date();
-          const brNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-          const hour  = brNow.getHours();
+          const now     = new Date();
+          const brNow   = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+          const hour    = brNow.getHours();
+          const minute  = brNow.getMinutes();
 
           // Suporte a parâmetros manuais via workflow_dispatch
           const inputData = process.env.INPUT_DATA_TESTE || '';
@@ -158,16 +162,21 @@ jobs:
           if (inputData) {
             // Modo teste: cria a data em horário de Brasília para evitar
             // deslocamento de fuso (servidor GitHub Actions roda em UTC)
-            const [y, m, d] = inputData.split('-').map(Number);
             targetDate = new Date(`${inputData}T12:00:00-03:00`);
             tipoNotif  = inputTipo === 'auto'
               ? (hour >= 20 ? 'vespera' : 'dia')
               : inputTipo;
             console.log(`[TESTE] Data manual: ${inputData} | Tipo: ${tipoNotif}`);
-          } else if (hour >= 20) {
+          } else if (hour === 23 - 3 && minute < 5) {
+            // Cron 23h00 UTC (20h00 Brasília) = véspera do próximo dia
             targetDate = addDays(brNow, 1);
             tipoNotif  = 'vespera';
+          } else if (hour === 23 - 3 && minute >= 5) {
+            // Cron 23h05 UTC (20h05 Brasília) = lembrete final de hoje
+            targetDate = new Date(brNow);
+            tipoNotif  = 'lembrete_marcar';
           } else {
+            // Cron 11h00 UTC (08h00 Brasília) = lembrete do dia
             targetDate = new Date(brNow);
             tipoNotif  = 'dia';
           }
@@ -187,11 +196,12 @@ jobs:
             weekday:'long', day:'numeric', month:'long', timeZone:'America/Sao_Paulo'
           });
 
-          const titulo   = tipoNotif === 'vespera'
-            ? `🌿 Amanhã é seu dia de regar!`
+          const titulo = tipoNotif === 'vespera' ? `🌿 Amanhã é seu dia de regar!`
+            : tipoNotif === 'lembrete_marcar'      ? `📋 Não esqueça de marcar no app!`
             : `💧 Hoje é seu dia de regar, ${nome}!`;
-          const mensagem = tipoNotif === 'vespera'
-            ? `${nome}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
+
+          const mensagem = tipoNotif === 'vespera' ? `${nome}, amanhã (${dataStr}) é sua vez de molhar as plantas. Não esqueça! 💧`
+            : tipoNotif === 'lembrete_marcar'      ? `${nome}, você regou hoje (${dataStr})? Não esqueça de confirmar no app! 🌱`
             : `Bom dia, ${nome}! Hoje (${dataStr}) é sua vez de molhar as plantas. Após regar, confirme no app! 🌱`;
 
           console.log(`Responsável: ${nome} (${tipoNotif})`);
@@ -322,18 +332,24 @@ jobs:
               }
 
               // Extrai rainDays: { 'YYYY-MM-DD': true }
-              // No Firestore REST, boolean true vem como { booleanValue: true }
               const rainRaw = fields.rain?.mapValue?.fields || {};
               const rainDays = {};
               for (const [date, val] of Object.entries(rainRaw)) {
-                // Aceita booleanValue true ou qualquer valor truthy (string 'true', etc)
                 if (val.booleanValue === true || val.stringValue === 'true' || val.nullValue === undefined && val.booleanValue) {
                   rainDays[date] = true;
                 }
               }
 
-              return { swaps, records, volunteered, rainDays };
-            } catch(e) { return { swaps: {}, records: {}, volunteered: {}, rainDays: {} }; }
+              // Extrai skipped: { 'YYYY-MM-DD': { by } }
+              const skippedRaw = fields.skipped?.mapValue?.fields || {};
+              const skipped = {};
+              for (const [date, val] of Object.entries(skippedRaw)) {
+                const m = val.mapValue?.fields || {};
+                skipped[date] = { by: m.by?.stringValue };
+              }
+
+              return { swaps, records, volunteered, rainDays, skipped };
+            } catch(e) { return { swaps: {}, records: {}, volunteered: {}, rainDays: {}, skipped: {} }; }
           }
 
           // Monta calendário real aplicando todos os swaps sobre o calendário base,
@@ -379,14 +395,22 @@ jobs:
                 process.exit(0);
               }
 
-              // Busca swaps e chuvas do Firestore e monta calendário real
-              const { swaps, rainDays: rainDaysReal } = await getDados(accessToken);
-              // Atualiza rainDays global para que nextValid use os dados reais
+              // Busca swaps, chuvas e registros do Firestore
+              const { swaps, rainDays: rainDaysReal, records, skipped, volunteered } = await getDados(accessToken);
               Object.assign(rainDays, rainDaysReal);
               console.log(`Dias de chuva registrados: ${Object.keys(rainDaysReal).length}`);
               const targetKey  = toKey(targetDate);
               const schedEnd   = addDays(targetDate, 180);
               const realSched  = buildRealSched(swaps, schedEnd);
+
+              // Lembrete final (20h05): só envia se a pessoa AINDA NÃO registrou nada hoje
+              if (tipoNotif === 'lembrete_marcar') {
+                const jaRegistrou = !!records[targetKey] || !!skipped[targetKey] || !!volunteered[targetKey];
+                if (jaRegistrou) {
+                  console.log(`${nome} já registrou algo em ${targetKey} — lembrete não enviado.`);
+                  process.exit(0);
+                }
+              }
 
               // Log dos próximos 10 dias para diagnóstico
               console.log('--- Calendário real (próximos 10 slots) ---');
