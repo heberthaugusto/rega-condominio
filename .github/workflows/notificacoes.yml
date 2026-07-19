@@ -47,6 +47,7 @@ jobs:
           VAPID_PRIVATE_KEY:     ${{ secrets.VAPID_PRIVATE_KEY }}
           INPUT_DATA_TESTE:      ${{ github.event.inputs.data_teste }}
           INPUT_TIPO_TESTE:      ${{ github.event.inputs.tipo_teste }}
+          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
         run: |
           node << 'SCRIPT'
           const https   = require('https');
@@ -151,36 +152,49 @@ jobs:
           const now     = new Date();
           const brNow   = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
           const hour    = brNow.getHours();
-          const minute  = brNow.getMinutes();
 
           // Suporte a parâmetros manuais via workflow_dispatch
           const inputData = process.env.INPUT_DATA_TESTE || '';
           const inputTipo = process.env.INPUT_TIPO_TESTE || 'auto';
 
+          // github.event.schedule contém a expressão cron EXATA que disparou o
+          // workflow — não depende do horário real de execução, então não é
+          // afetado por atrasos do GitHub Actions (que podem passar de 5-15min).
+          const eventSchedule = process.env.GITHUB_EVENT_SCHEDULE || '';
+
           let targetDate, tipoNotif;
 
           if (inputData) {
-            // Modo teste: cria a data em horário de Brasília para evitar
-            // deslocamento de fuso (servidor GitHub Actions roda em UTC)
+            // Modo teste manual: usa a data e tipo informados diretamente
             targetDate = new Date(`${inputData}T12:00:00-03:00`);
             tipoNotif  = inputTipo === 'auto'
               ? (hour >= 20 ? 'vespera' : 'dia')
               : inputTipo;
             console.log(`[TESTE] Data manual: ${inputData} | Tipo: ${tipoNotif}`);
-          } else if (hour === 23 - 3 && minute < 5) {
-            // Cron 23h00 UTC (20h00 Brasília) = véspera do próximo dia
+          } else if (eventSchedule === '0 23 * * *') {
+            // VÉSPERA — dispara às 20h00 do dia ANTERIOR à rega
+            // Ex: dispara 09/07 às 20h, avisando que 10/07 é o dia de regar
             targetDate = addDays(brNow, 1);
             tipoNotif  = 'vespera';
-          } else if (hour === 23 - 3 && minute >= 5) {
-            // Cron 23h05 UTC (20h05 Brasília) = lembrete final de hoje
+          } else if (eventSchedule === '0 11 * * *') {
+            // DIA — dispara às 08h00 do PRÓPRIO dia da rega
+            // Ex: dispara 10/07 às 8h, avisando que hoje é o dia de regar
+            targetDate = new Date(brNow);
+            tipoNotif  = 'dia';
+          } else if (eventSchedule === '5 23 * * *') {
+            // LEMBRETE FINAL — dispara às 20h05 do PRÓPRIO dia da rega
+            // Ex: dispara 10/07 às 20h05, lembrando de marcar se ainda não marcou
             targetDate = new Date(brNow);
             tipoNotif  = 'lembrete_marcar';
           } else {
-            // Cron 11h00 UTC (08h00 Brasília) = lembrete do dia
+            // Fallback de segurança (não deveria cair aqui em produção)
+            console.log(`[AVISO] eventSchedule não reconhecido: "${eventSchedule}" — usando fallback por horário`);
             targetDate = new Date(brNow);
-            tipoNotif  = 'dia';
+            tipoNotif  = hour >= 20 ? 'vespera' : 'dia';
+            if (tipoNotif === 'vespera') targetDate = addDays(brNow, 1);
           }
           targetDate.setHours(12,0,0,0);
+          console.log(`[Debug] eventSchedule="${eventSchedule}" | hour=${hour} | tipoNotif=${tipoNotif}`);
 
           const isKarinaDay = karinaSundays.has(toKey(targetDate));
           const respA       = getResponsibleFor(targetDate);
