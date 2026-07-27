@@ -950,9 +950,12 @@ function renderNextDay() {
     if (resp !== currentUser.id) continue;
     if (records[key]) continue;
     // Verifica chuva — pula se for dia de chuva ou um dos 2 dias de folga seguintes
+    // Exceção: Karina tem dias fixos e não é afetada pela folga pós-chuva,
+    // só pelo próprio dia da chuva (caso raro de coincidir com seu domingo)
     const p1 = toKey(addDays(d,-1));
     const p2 = toKey(addDays(d,-2));
-    if (rainDays[key] || rainDays[p1] || rainDays[p2]) continue;
+    if (rainDays[key]) continue;
+    if (resp !== 'karina' && (rainDays[p1] || rainDays[p2])) continue;
     // Encontrou!
     const label = i === 0 ? 'Hoje é seu dia de regar! 💧' :
                   i === 1 ? 'Amanhã é seu dia de regar!' :
@@ -999,7 +1002,8 @@ function renderCalendar() {
     const prev1Key  = toKey(addDays(d,-1));
     const prev2Key  = toKey(addDays(d,-2));
     const isAfterRain = (rainDays[prev1Key] || rainDays[prev2Key]) && !isRain;
-    const noWater   = isRain || isAfterRain; // usado para lógica de remanejamento
+    // Karina tem dias fixos — folga após chuva não se aplica a ela
+    const noWater   = isRain || (isAfterRain && resp !== 'karina');
     const watered   = records[key];
     const wasSkipped = skipped[key];
     const volunteerW = volunteered[key];
@@ -1081,7 +1085,10 @@ function openModal(key, d) {
   const prev1Key = toKey(addDays(d,-1));
   const prev2Key = toKey(addDays(d,-2));
   const isAfterRain = (rainDays[prev1Key] || rainDays[prev2Key]) && !isRain;
-  const noWater  = isRain || isAfterRain;
+  // Karina tem dias fixos (não é remanejada pela chuva) — por isso o dia de
+  // folga após chuva não deve bloqueá-la de confirmar rega. Só o próprio dia
+  // da chuva continua bloqueado para todos, inclusive Karina.
+  const noWater  = isRain || (isAfterRain && resp !== 'karina');
   const watered  = records[key];
   const wasSkipped = skipped[key];
   const volunteerW = volunteered[key];
