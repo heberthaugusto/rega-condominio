@@ -1152,7 +1152,11 @@ function openModal(key, d) {
   const wateredBy  = watered    ? getUserById(watered.by)    : null;
   const volunteerBy = volunteerW ? getUserById(volunteerW.by) : null;
   // Dia livre = sem ninguém escalado (dia de intervalo entre regas)
-  const isFreeDay   = !resp && !noWater;
+  // Dia livre para registro: qualquer dia sem responsável escalado.
+  // A folga pós-chuva NÃO bloqueia o registro — quem está a até 2 dias do
+  // próprio slot pode ter regado mesmo assim (ex.: adiantou a rega porque
+  // faltaria água no dia oficial). Só o próprio dia da chuva segue bloqueado.
+  const isFreeDay   = !resp && !isRain;
   const anchorUser  = anchors[key] ? getUserById(anchors[key]) : null;
   const iAmAnchor   = anchors[key] === currentUser.id;
 
@@ -1191,7 +1195,9 @@ function openModal(key, d) {
           <div class="modal-info-title" style="color:#60a5fa">
             ${isRain ? (isFuture ? 'Chuva prevista' : 'Chuva registrada') : 'Dia de folga após chuva'}
           </div>
-          <div class="modal-info-sub">Não é necessário regar</div>
+          <div class="modal-info-sub">${(!isRain && nearMySlot && !anchorUser && isPast && !isTooLate)
+            ? 'Se você regou neste dia, registre abaixo'
+            : 'Não é necessário regar'}</div>
         </div>
         ${isRain ? `<button onclick="removeRain('${key}')" style="margin-left:auto;background:#1e2e1e;border:1px solid #2a3a2a;border-radius:8px;padding:4px 10px;color:#fb7185;font-size:12px;font-weight:600">Remover</button>` : ''}
       </div>`;
