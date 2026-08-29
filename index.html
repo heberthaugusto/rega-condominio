@@ -392,6 +392,7 @@ const START_K  = new Date(2026, 4, 17); // 17/05/2026 — Karina: domingo sim/n�
 // UTILITÁRIOS DE DATA
 // ═══════════════════════════════════════════════════════
 const toKey  = d => `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;
+const parseKey = k => new Date(k + 'T12:00:00'); // meio-dia evita problema de fuso
 const p2     = n => String(n).padStart(2,'0');
 const addDays = (d,n) => { const r=new Date(d); r.setDate(r.getDate()+n); return r; };
 const isSun  = d => d.getDay() === 0;
@@ -416,6 +417,10 @@ let rainDays   = {}; // { 'YYYY-MM-DD': true }
 let skipped    = {}; // { 'YYYY-MM-DD': { by, at } }
 let volunteered = {}; // { 'YYYY-MM-DD': { by, at } }
 let swaps      = {}; // { 'YYYY-MM-DD': { skippedBy: userId, coveredBy: userId } }
+let anchors    = {}; // { 'YYYY-MM-DD': userId }
+                     // rega feita FORA do slot (dia sem ninguém escalado).
+                     // Reinicia a contagem de 3 dias a partir daquela data,
+                     // deslocando todos os próximos em cascata.
                      // quando coveredBy cobre skippedBy, o próximo slot de coveredBy vai para skippedBy
 
 // ═══════════════════════════════════════════════════════
@@ -435,6 +440,7 @@ async function loadAll() {
       skipped     = d.skipped     || {};
       volunteered = d.volunteered || {};
       swaps       = d.swaps       || {};
+      anchors     = d.anchors     || {};
     }
   } catch(e) {
     console.warn('[Firebase] loadAll error:', e);
@@ -457,7 +463,7 @@ async function save(key, data) {
   const keyMap = {
     'rega-records': 'records', 'rega-rain': 'rain',
     'rega-skipped': 'skipped', 'rega-volunteered': 'volunteered',
-    'rega-swaps': 'swaps'
+    'rega-swaps': 'swaps', 'rega-anchors': 'anchors'
   };
   const mapped = keyMap[key];
   console.log('[Firebase] Tentando salvar:', mapped, data);
@@ -487,13 +493,15 @@ function startSync() {
     const newSkipped     = d.skipped     || {};
     const newVolunteered = d.volunteered || {};
     const newSwaps       = d.swaps       || {};
+    const newAnchors     = d.anchors     || {};
 
     const changed =
       JSON.stringify(newRecords)     !== JSON.stringify(records)     ||
       JSON.stringify(newRain)        !== JSON.stringify(rainDays)    ||
       JSON.stringify(newSkipped)     !== JSON.stringify(skipped)     ||
       JSON.stringify(newVolunteered) !== JSON.stringify(volunteered) ||
-      JSON.stringify(newSwaps)       !== JSON.stringify(swaps);
+      JSON.stringify(newSwaps)       !== JSON.stringify(swaps)       ||
+      JSON.stringify(newAnchors)     !== JSON.stringify(anchors);
 
     if (changed) {
       records     = newRecords;
@@ -501,6 +509,7 @@ function startSync() {
       skipped     = newSkipped;
       volunteered = newVolunteered;
       swaps       = newSwaps;
+      anchors     = newAnchors;
       renderCalendar();
       renderNextDay();
       showSyncToast();
@@ -609,26 +618,58 @@ function buildSchedule(fromDate, toDate) {
     return d;
   }
 
+  // ── ANCHORS ───────────────────────────────────────────────────────────────
+  // Um anchor é uma rega registrada num dia SEM ninguém escalado (dia de
+  // intervalo). Ele reinicia a contagem de 3 dias a partir daquela data e
+  // desloca todos os próximos em cascata, mantendo a ordem da rotação.
+  // Casos de uso: antecipar a rega (falta d'água no dia oficial) ou
+  // registrar a rega feita com atraso, no dia seguinte ao slot original.
+  const anchorList = Object.entries(anchors).sort(([a],[b]) => a.localeCompare(b));
+  let ai = 0;
+
   let cur = cloneD(START_A);
   let idx = 0;
 
   while (cur <= toDate) {
-    // nextValid já aplica todas as regras: chuva, Karina (domingo/véspera/seg-ter), domingo comum
-    cur = nextValid(cur);
-    if (cur > toDate) break;
+    // nextValid já aplica todas as regras: chuva, Karina (domingo/véspera/seg-ter)
+    const nat    = nextValid(cur);
+    const natKey = toKey(nat);
 
-    const curKey = toKey(cur);
+    // O anchor assume o comando quando sua data chega antes (ou junto) do
+    // próximo slot natural da sequência
+    if (ai < anchorList.length && anchorList[ai][0] <= natKey) {
+      const [aDate, aUser] = anchorList[ai];
+      ai++;
+
+      // O anchor SUBSTITUI o slot original dessa pessoa: remove qualquer slot
+      // dela a até 3 dias de distância, para não duplicar a mesma pessoa
+      for (const key of Object.keys(sched)) {
+        if (!sched[key] || sched[key].groupA !== aUser) continue;
+        const diff = Math.abs((parseKey(key) - parseKey(aDate)) / 86400000);
+        if (diff <= 3) delete sched[key].groupA;
+      }
+
+      sched[aDate] = sched[aDate] || {};
+      sched[aDate].groupA = aUser;
+      sched[aDate].isAnchor = true;
+
+      idx = GROUP_A.indexOf(aUser) + 1;
+      cur = nextValid(addDays(parseKey(aDate), 3));
+      continue;
+    }
+
+    if (nat > toDate) break;
 
     // Registra o responsável
-    if (cur >= fromDate) {
-      sched[curKey] = sched[curKey] || {};
-      sched[curKey].groupA = GROUP_A[idx % GROUP_A.length];
+    if (nat >= fromDate && !(sched[natKey] && sched[natKey].groupA)) {
+      sched[natKey] = sched[natKey] || {};
+      sched[natKey].groupA = GROUP_A[idx % GROUP_A.length];
     }
 
     idx++;
 
     // Próximo candidato: molha 1, folga 2 → +3 dias
-    cur = addDays(cur, 3);
+    cur = addDays(nat, 3);
   }
 
   return sched;
@@ -641,35 +682,40 @@ function getScheduleFor(d) {
   return buildSchedule(bigFrom, to);
 }
 
+// Aplica todos os swaps em CASCATA sobre o calendário, na ordem cronológica.
+// Cada swap move o próximo slot livre do coveredBy para o skippedBy, olhando
+// para o calendário JÁ MODIFICADO pelos swaps anteriores. Isso é essencial
+// quando a mesma pessoa cobre mais de um colega: ela cede um slot por cobertura.
+// (Mesma lógica do notificacoes.yml — as duas precisam bater.)
+function applySwaps(sched) {
+  const real = {};
+  for (const [k, s] of Object.entries(sched)) {
+    if (s && s.groupA) real[k] = s.groupA;
+  }
+
+  const swapsSorted = Object.entries(swaps).sort(([a], [b]) => a.localeCompare(b));
+  for (const [swapDate, swap] of swapsSorted) {
+    const nextSlot = Object.keys(real)
+      .filter(d => real[d] === swap.coveredBy && d > swapDate)
+      .sort()[0];
+    if (nextSlot) real[nextSlot] = swap.skippedBy;
+  }
+  return real;
+}
+
+// Cache do resultado dos swaps, invalidado quando o calendário muda
+let _swapCache = { sched: null, real: null };
+
 function getResponsible(dateKey, sched) {
   const s = sched[dateKey];
   if (!s) return null;
   if (s.karina) return 'karina';
   if (!s.groupA) return null;
 
-  const base = s.groupA;
-
-  // Verifica se este slot é o PRÓXIMO slot do coveredBy após um swap
-  // Se sim, passa para o skippedBy (pessoa que foi coberta)
-  for (const [swapDate, swap] of Object.entries(swaps)) {
-    if (swap.coveredBy !== base) continue;
-    if (swapDate >= dateKey) continue;
-    // Este é o próximo slot do coveredBy após o swap?
-    const isNextSlot = isNextSlotAfterSwap(swap.coveredBy, swapDate, dateKey, sched);
-    if (isNextSlot) return swap.skippedBy;
+  if (_swapCache.sched !== sched) {
+    _swapCache = { sched, real: applySwaps(sched) };
   }
-
-  return base;
-}
-
-// Verifica se dateKey é o próximo slot de userId após swapDate no calendário base
-function isNextSlotAfterSwap(userId, swapDate, dateKey, sched) {
-  // Percorre o calendário base procurando o próximo slot do userId após swapDate
-  const entries = Object.entries(sched)
-    .filter(([d, s]) => s.groupA === userId && d > swapDate)
-    .sort(([a], [b]) => a.localeCompare(b));
-  if (entries.length === 0) return false;
-  return entries[0][0] === dateKey;
+  return _swapCache.real[dateKey] || s.groupA;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1041,6 +1087,11 @@ function renderCalendar() {
       av.style.background = respUser.color;
       av.textContent = respUser.name[0];
       ind.appendChild(av);
+      // Anchor = rega registrada fora do slot original (reajustou a escala)
+      if (anchors[key] === resp) {
+        av.style.boxShadow = '0 0 0 2px #4ade80';
+        av.title = 'Rega registrada fora da escala';
+      }
     }
 
     cell.appendChild(ind);
@@ -1100,6 +1151,31 @@ function openModal(key, d) {
   const isFuture = d > todayD();
   const wateredBy  = watered    ? getUserById(watered.by)    : null;
   const volunteerBy = volunteerW ? getUserById(volunteerW.by) : null;
+  // Dia livre = sem ninguém escalado (dia de intervalo entre regas)
+  const isFreeDay   = !resp && !noWater;
+  const anchorUser  = anchors[key] ? getUserById(anchors[key]) : null;
+  const iAmAnchor   = anchors[key] === currentUser.id;
+
+  // Distância (em dias) entre este dia livre e o slot escalado mais próximo
+  // do usuário logado. Só permitimos registrar rega em dia livre se estiver
+  // a no máximo 2 dias do próprio slot (antes ou depois). Isso evita que
+  // alguém "fure a fila" regando muito antes da sua vez e reiniciando a
+  // escala inteira — para cobrir outra pessoa existe o voluntariado.
+  const MAX_DIST_ANCHOR = 2;
+  let distToMySlot = Infinity;
+  for (const sk of Object.keys(sched)) {
+    if (!sched[sk] || sched[sk].groupA !== currentUser.id) continue;
+    const dist = Math.abs((parseKey(sk) - parseKey(key)) / 86400000);
+    if (dist < distToMySlot) distToMySlot = dist;
+  }
+  const nearMySlot = distToMySlot <= MAX_DIST_ANCHOR;
+
+  // ── REGRA DOS 5 DIAS ────────────────────────────────────────────────────
+  // Passados mais de 5 dias do dia escalado, não é mais possível confirmar
+  // a rega. Evita registro indevido muito depois do ocorrido.
+  const MAX_DIAS_CONFIRMAR = 5;
+  const diasDesde = Math.floor((todayD() - d) / 86400000);
+  const isTooLate = diasDesde > MAX_DIAS_CONFIRMAR;
 
   let html = `
     <div class="modal-date-dow">${DOW_NAMES[d.getDay()]}</div>
@@ -1135,6 +1211,27 @@ function openModal(key, d) {
     html += `<div class="modal-info-box" style="justify-content:center;color:#4a6a4a">Dia sem rega programada</div>`;
   }
 
+  // ── Card do DIA LIVRE (sem ninguém escalado) ──────────────────────────
+  // Qualquer pessoa pode registrar que regou neste dia. Isso reinicia a
+  // contagem da escala a partir daqui, deslocando todos os próximos.
+  if (isFreeDay && anchorUser) {
+    html += `<div class="modal-info-box" style="background:#4ade8012;border:1px solid #4ade8033">
+      <div class="big-emoji">💧</div>
+      <div>
+        <div class="modal-info-title" style="color:#4ade80">Regou neste dia</div>
+        <div class="modal-info-sub">${anchorUser.name} — escala reajustada a partir daqui</div>
+      </div>
+    </div>`;
+  } else if (isFreeDay && isPast) {
+    html += `<div class="modal-info-box" style="background:#60a5fa10;border:1px solid #60a5fa25">
+      <div class="big-emoji">🗓️</div>
+      <div>
+        <div class="modal-info-title" style="color:#93c5fd">Dia sem escala</div>
+        <div class="modal-info-sub">Se você regou hoje, registre abaixo</div>
+      </div>
+    </div>`;
+  }
+
   // Registros existentes — verbos conjugados conforme passado ou futuro
   if (watered) {
     html += `<div class="modal-record" style="background:#4ade8015;border:1px solid #4ade8033">
@@ -1161,8 +1258,35 @@ function openModal(key, d) {
   html += `<div class="modal-actions">`;
 
   // Confirmar rega: responsável no dia (passado ou hoje), ou qualquer um se foi pulado
-  if (!noWater && respUser && !watered && (isPast || isIVolunteer) && canConfirm) {
+  if (!noWater && respUser && !watered && (isPast || isIVolunteer) && canConfirm && !isTooLate) {
     html += `<button class="action-btn" style="background:#4ade80;color:#0f1a0f" onclick="confirmWatered()">💧 Confirmei que reguei!</button>`;
+  }
+  // Prazo esgotado: explica por que não há mais como confirmar
+  if (!noWater && respUser && !watered && isTooLate && !wasSkipped && !volunteerW) {
+    html += `<div class="modal-info-box" style="background:#fb718510;border:1px solid #fb718525">
+      <div class="big-emoji">⏳</div>
+      <div>
+        <div class="modal-info-title" style="color:#fca5a5">Prazo encerrado</div>
+        <div class="modal-info-sub">Passaram-se mais de ${MAX_DIAS_CONFIRMAR} dias. Não é mais possível registrar a rega deste dia.</div>
+      </div>
+    </div>`;
+  }
+
+  // ── Botões do DIA LIVRE ────────────────────────────────────────────────
+  // Qualquer pessoa pode marcar que regou num dia sem escala.
+  if (isFreeDay && isPast && !anchorUser && !isTooLate) {
+    if (nearMySlot) {
+      html += `<button class="action-btn" style="background:#4ade80;color:#0f1a0f" onclick="confirmFreeDayWater()">💧 Eu reguei neste dia</button>`;
+    } else {
+      html += `<div class="modal-info-sub" style="padding:8px 2px;opacity:.75">
+        Você só pode registrar rega num dia livre até 2 dias antes ou depois do seu dia escalado.
+        Para cobrir outra pessoa, use o dia dela e toque em "Eu reguei no lugar".
+      </div>`;
+    }
+  }
+  // Só quem registrou pode desfazer
+  if (isFreeDay && iAmAnchor) {
+    html += `<button class="action-btn-outline" style="border:1px solid #fbbf2444;color:#fbbf24" onclick="undoFreeDayWater()">↩️ Desfazer registro de rega</button>`;
   }
 
   // Desfazer voluntariado — botão único que cancela tudo (rega + voluntariado + swap)
@@ -1213,6 +1337,11 @@ function closeModal(e) {
 // AÇÕES
 // ═══════════════════════════════════════════════════════
 async function confirmWatered() {
+  // Passados mais de 5 dias do dia escalado, o registro não é mais aceito
+  if (Math.floor((todayD() - modalDate) / 86400000) > 5) {
+    showToast('⏳ Passaram-se mais de 5 dias. Não é mais possível registrar a rega.');
+    return;
+  }
   records[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
   await save('rega-records', records);
   showToast('✅ Rega registrada!');
@@ -1326,6 +1455,64 @@ async function undoVolunteerAll() {
     renderNextDay();
   } catch(e) {
     console.error('[undoVolunteerAll] Erro:', e);
+    showToast('❌ Erro ao desfazer: ' + e.message);
+  }
+}
+
+// Registra rega num dia SEM ninguém escalado (dia de intervalo).
+// Isso cria um "anchor": a contagem de 3 dias recomeça a partir desta data
+// e todos os próximos da escala são deslocados em cascata.
+async function confirmFreeDayWater() {
+  // Trava 1: só dia passado ou atual, nunca futuro
+  if (modalDate > todayD()) {
+    showToast('⚠️ Só é possível registrar rega em dias que já chegaram.');
+    return;
+  }
+  // Trava 2: no máximo 5 dias após o dia
+  if (Math.floor((todayD() - modalDate) / 86400000) > 5) {
+    showToast('⏳ Passaram-se mais de 5 dias. Não é mais possível registrar.');
+    return;
+  }
+  // Trava 3: o dia livre precisa estar a até 2 dias do slot da própria pessoa
+  const _sched = getScheduleFor(modalDate);
+  let _dist = Infinity;
+  for (const sk of Object.keys(_sched)) {
+    if (!_sched[sk] || _sched[sk].groupA !== currentUser.id) continue;
+    const dd = Math.abs((parseKey(sk) - parseKey(modalKey)) / 86400000);
+    if (dd < _dist) _dist = dd;
+  }
+  if (_dist > 2) {
+    showToast('⚠️ Só é possível registrar até 2 dias do seu dia escalado.');
+    return;
+  }
+  try {
+    anchors[modalKey] = currentUser.id;
+    await save('rega-anchors', anchors);
+    // Registra também como rega confirmada, para histórico
+    records[modalKey] = { by: currentUser.id, at: new Date().toISOString() };
+    await save('rega-records', records);
+    showToast('💧 Rega registrada! A escala foi reajustada a partir deste dia.');
+    document.getElementById('modal').style.display = 'none';
+    renderCalendar();
+    renderNextDay();
+  } catch(e) {
+    showToast('❌ Erro ao registrar: ' + e.message);
+  }
+}
+
+async function undoFreeDayWater() {
+  try {
+    delete anchors[modalKey];
+    delete records[modalKey];
+    await saveDelete({
+      [`anchors.${modalKey}`]: deleteField(),
+      [`records.${modalKey}`]: deleteField(),
+    });
+    showToast('↩️ Registro desfeito. Escala voltou ao normal.');
+    document.getElementById('modal').style.display = 'none';
+    renderCalendar();
+    renderNextDay();
+  } catch(e) {
     showToast('❌ Erro ao desfazer: ' + e.message);
   }
 }
@@ -1482,6 +1669,8 @@ window.undoSkip       = undoSkip;
 window.confirmVolunteer = confirmVolunteer;
 window.undoVolunteer    = undoVolunteer;
 window.undoVolunteerAll = undoVolunteerAll;
+window.confirmFreeDayWater = confirmFreeDayWater;
+window.undoFreeDayWater    = undoFreeDayWater;
 window.confirmRain    = confirmRain;
 window.removeRain     = removeRain;
 window.doUpdate       = doUpdate;
