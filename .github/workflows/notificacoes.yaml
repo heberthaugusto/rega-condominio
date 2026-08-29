@@ -340,21 +340,51 @@ jobs:
                 skipped[date] = { by: m.by?.stringValue };
               }
 
-              return { swaps, records, volunteered, rainDays, skipped };
-            } catch(e) { return { swaps: {}, records: {}, volunteered: {}, rainDays: {}, skipped: {} }; }
+              // Extrai anchors: { 'YYYY-MM-DD': userId }
+              const anchorsRaw = fields.anchors?.mapValue?.fields || {};
+              const anchors = {};
+              for (const [date, val] of Object.entries(anchorsRaw)) {
+                if (val.stringValue) anchors[date] = val.stringValue;
+              }
+
+              return { swaps, records, volunteered, rainDays, skipped, anchors };
+            } catch(e) { return { swaps: {}, records: {}, volunteered: {}, rainDays: {}, skipped: {}, anchors: {} }; }
           }
 
           // Monta calendário real aplicando todos os swaps sobre o calendário base,
           // exatamente como o app faz — retorna { 'YYYY-MM-DD': userId }
-          function buildRealSched(swaps, schedEnd) {
-            // 1. Calendário base
+          const parseKey = k => new Date(k + 'T12:00:00');
+
+          function buildRealSched(swaps, schedEnd, anchors) {
+            // 1. Calendário base — já aplicando os ANCHORS
+            // (rega registrada fora do slot reinicia a contagem a partir dela)
             const base = {};
+            const anchorList = Object.entries(anchors || {}).sort(([a],[b]) => a.localeCompare(b));
+            let ai = 0;
             let cur = new Date(START_A), idx = 0;
+
             while (cur <= schedEnd) {
-              cur = nextValid(cur);
-              base[toKey(cur)] = GROUP_A[idx % GROUP_A.length];
+              const nat    = nextValid(cur);
+              const natKey = toKey(nat);
+
+              if (ai < anchorList.length && anchorList[ai][0] <= natKey) {
+                const [aDate, aUser] = anchorList[ai];
+                ai++;
+                // Remove slot original da mesma pessoa a até 3 dias do anchor
+                for (const key of Object.keys(base)) {
+                  if (base[key] !== aUser) continue;
+                  if (Math.abs((parseKey(key) - parseKey(aDate)) / 86400000) <= 3) delete base[key];
+                }
+                base[aDate] = aUser;
+                idx = GROUP_A.indexOf(aUser) + 1;
+                cur = nextValid(addDays(parseKey(aDate), 3));
+                continue;
+              }
+
+              if (nat > schedEnd) break;
+              if (!base[natKey]) base[natKey] = GROUP_A[idx % GROUP_A.length];
               idx++;
-              cur = addDays(cur, 3);
+              cur = addDays(nat, 3);
             }
 
             // 2. Aplica swaps em ordem cronológica
@@ -391,7 +421,7 @@ jobs:
               // qualquer responsável — nextValid() depende de rainDays estar
               // populado corretamente, senão o cálculo do responsável base fica
               // errado (bug que causava notificação para a pessoa errada).
-              const { swaps, rainDays: rainDaysReal, records, skipped, volunteered } = await getDados(accessToken);
+              const { swaps, rainDays: rainDaysReal, records, skipped, volunteered, anchors } = await getDados(accessToken);
               Object.assign(rainDays, rainDaysReal);
               console.log(`Dias de chuva registrados: ${Object.keys(rainDaysReal).length}`);
 
@@ -410,7 +440,8 @@ jobs:
 
               const targetKey  = toKey(targetDate);
               const schedEnd   = addDays(targetDate, 180);
-              const realSched  = buildRealSched(swaps, schedEnd);
+              const realSched  = buildRealSched(swaps, schedEnd, anchors);
+              console.log(`Anchors registrados: ${Object.keys(anchors).length}`);
 
               // Lembrete final (20h05): só envia se a pessoa AINDA NÃO registrou nada hoje
               // e se o dia não está dispensado por chuva
