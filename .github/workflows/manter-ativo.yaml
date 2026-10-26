@@ -1,0 +1,32 @@
+name: Manter workflows ativos
+
+# O GitHub desativa workflows agendados após 60 dias sem commit no repositório.
+# Este workflow faz um commit mínimo uma vez por mês (só atualiza um arquivo de
+# registro dentro de .github/), o que mantém o repositório ativo e o workflow
+# "Notificações de Rega" funcionando. Não toca em nenhum arquivo do aplicativo.
+
+on:
+  schedule:
+    # Dia 1 de cada mês, 12h00 UTC (09h00 em Brasília)
+    - cron: '0 12 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Registrar execução e fazer commit
+        run: |
+          mkdir -p .github/keepalive
+          date -u '+%Y-%m-%d %H:%M UTC' > .github/keepalive/ultima_execucao.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/keepalive/ultima_execucao.txt
+          git commit -m "chore: mantém workflows agendados ativos" || echo "Nada para commitar"
+          git push
