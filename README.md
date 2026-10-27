@@ -194,6 +194,8 @@ service cloud.firestore {
 Os registros de rega são armazenados no Firebase Firestore e compartilhados entre os moradores do condomínio em tempo real. As subscriptions de notificação push são armazenadas no Firestore vinculadas ao usuário e dispositivo. Nenhum dado é compartilhado com terceiros.
 
 ---
+> ⚖️ **Uso do código:** Licenciado sob PolyForm Noncommercial 1.0.0. Uso pessoal, acadêmico e sem fins lucrativos permitido. Uso comercial não permitido. Veja o arquivo LICENSE.
+---
 
 ## 👤 Autor
 
