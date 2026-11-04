@@ -137,7 +137,7 @@ rega-condominio/
 │   └── workflows/
 │       └── notificacoes.yaml Cron job de notificações push (GitHub Actions)
 ├── firestore.rules         Regras de segurança do Firestore
-├── docs/                   Telas do aplicativo (dados fictícios)
+├── docs/                   Telas do aplicativo
 └── README.md               Este arquivo
 ```
 
