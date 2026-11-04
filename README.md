@@ -20,7 +20,7 @@
 |---|---|---|
 | ![Login](docs/tela-login.png) | ![Calendário](docs/tela-calendario.png) | ![Registro](docs/tela-registro.png) |
 
-> ℹ️ O aplicativo está em uso real pelos moradores do condomínio, por isso não há demo pública. As telas acima mostram a interface com dados fictícios.
+> ℹ️ O aplicativo está em uso real pelos moradores do condomínio, por isso não há demo pública. As telas acima mostram a interface do aplicativo em uso.
 
 ---
 
