@@ -351,6 +351,7 @@
 // ═══════════════════════════════════════════════════════
 import { initializeApp }                                          from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, onSnapshot, deleteField } from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js';
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from 'https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js';
 // firebase-messaging não é suportado no Safari/iOS — importado de forma lazy apenas quando necessário
 
 const firebaseConfig = {
@@ -368,19 +369,25 @@ const db   = getFirestore(_app);
 // Expõe instâncias globalmente
 window.db = db;
 window.__firebase_app_instance = _app;
+const auth = getAuth(_app);
 
 // ═══════════════════════════════════════════════════════
 // CONFIGURAÇÃO
 // ═══════════════════════════════════════════════════════
-// Senhas armazenadas como hashes SHA-256 — nunca em texto puro
+// Autenticação pelo Firebase Authentication (e-mail e senha).
+// Cada morador tem um usuário no Firebase com o e-mail <id>@AUTH_EMAIL_DOMAIN.
+// As senhas ficam só no Firebase; nada de senha ou hash no código.
+const AUTH_EMAIL_DOMAIN = 'rega-condominio.app';
 const USERS = [
-  { id: 'heberth', name: 'Heberth', passwordHash: 'db2a4e1358385f65fcdb1747589c322c8c657a9de9693a8419014bd1d3349df5', color: '#4ade80' },
-  { id: 'simone',  name: 'Simone',  passwordHash: '951e116844f077a7bc627254df2c5b2f2b540d3ff82cda6afa4b7203b50c516b', color: '#60a5fa' },
-  { id: 'flavio',  name: 'Flávio',  passwordHash: 'c75161c0b583736ee0f845aa587a24d7db8baec2d640962428f3b18fa6622d2e', color: '#f97316' },
-  { id: 'bruno',   name: 'Bruno',   passwordHash: '07e15c0073810c825953b1dbb7a2c085624b67d2e3f4a36780a6546d3d53b3aa', color: '#a78bfa' },
-  { id: 'luciano', name: 'Luciano', passwordHash: 'bf81eff9dda8005ff2bc44366f8b7d5faeafc975db94608e50bcae05e9df7264', color: '#fb7185' },
-  { id: 'karina',  name: 'Karina',  passwordHash: '40f9644c963231ccddd945fe64f5cce4a8d98c54504b3dbdb6568fef5a3a3e10', color: '#fbbf24' },
+  { id: 'heberth', name: 'Heberth', color: '#4ade80' },
+  { id: 'simone',  name: 'Simone',  color: '#60a5fa' },
+  { id: 'flavio',  name: 'Flávio',  color: '#f97316' },
+  { id: 'bruno',   name: 'Bruno',   color: '#a78bfa' },
+  { id: 'luciano', name: 'Luciano', color: '#fb7185' },
+  { id: 'karina',  name: 'Karina',  color: '#fbbf24' },
 ];
+const emailDoUsuario = id => `${id}@${AUTH_EMAIL_DOMAIN}`;
+const usuarioDoEmail = email => USERS.find(u => emailDoUsuario(u.id) === (email || '').toLowerCase());
 
 // Grupo A: âncora = Simone em 21/05/2026
 // GROUP_A começa em Simone; idx 0=simone, 1=flávio, 2=bruno, 3=luciano, 4=heberth, depois repete
@@ -919,28 +926,38 @@ async function doLogin() {
   if (!selectedUserId) return;
   const u = getUserById(selectedUserId);
   const passRaw = document.getElementById('password-input').value;
-  // Compara hash SHA-256 da senha digitada com o hash armazenado
-  const encoder = new TextEncoder();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(passRaw));
-  const hashArray  = Array.from(new Uint8Array(hashBuffer));
-  const hashHex    = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  if (hashHex === u.passwordHash) {
-    currentUser = u;
-    localStorage.setItem('rega_logged_user', u.id);
-    showApp();
-  } else {
+  const btn = document.getElementById('login-btn');
+  btn.disabled = true;
+  try {
+    // A senha é conferida pelo Firebase Authentication; a sessão fica
+    // persistida no aparelho e onAuthStateChanged abre o app.
+    await signInWithEmailAndPassword(auth, emailDoUsuario(u.id), passRaw);
+  } catch(e) {
+    console.warn('[Auth] login falhou:', e.code);
     const errEl = document.getElementById('login-error');
+    errEl.textContent = e.code === 'auth/too-many-requests'
+      ? 'Muitas tentativas. Aguarde alguns minutos.'
+      : (e.code === 'auth/network-request-failed' ? 'Sem conexão. Tente de novo.' : 'Senha incorreta');
     errEl.style.display = 'block';
     const passArea = document.getElementById('password-area');
     passArea.classList.add('shake');
     setTimeout(() => passArea.classList.remove('shake'), 500);
+  } finally {
+    btn.disabled = false;
   }
+}
+
+// Chamado pelo onAuthStateChanged quando há sessão válida
+async function entrarComoUsuario(u) {
+  currentUser = u;
+  await loadAll();
+  showApp();
 }
 
 function logout() {
   stopSync();
   currentUser = null;
-  localStorage.removeItem('rega_logged_user');
+  signOut(auth).catch(e => console.warn('[Auth] signOut:', e));
   document.getElementById('main-app').classList.remove('visible');
   document.getElementById('login-screen').style.display = 'flex';
   selectedUserId = null;
@@ -1563,7 +1580,7 @@ function showToast(msg) {
 // ═══════════════════════════════════════════════════════
 // ATUALIZAÇÃO AUTOMÁTICA (Service Worker + versão)
 // ═══════════════════════════════════════════════════════
-const APP_VERSION = '1.3.0'; // ← incrementar a cada deploy
+const APP_VERSION = '1.4.0'; // ← incrementar a cada deploy
 
 function checkForUpdate() {
   if (!('serviceWorker' in navigator)) return;
@@ -1647,18 +1664,22 @@ async function init() {
     }).catch(() => {});
   }
 
-  // Carrega dados
-  await loadAll();
-
   // Verifica atualizações
   checkForUpdate();
 
-  // Auto-login
-  const saved = localStorage.getItem('rega_logged_user');
-  if (saved) {
-    const u = getUserById(saved);
-    if (u) { currentUser = u; showApp(); return; }
-  }
+  // Sessão: o Firebase guarda o login no aparelho. Com sessão válida, abre
+  // o app direto; sem sessão, fica na tela de login. Os dados só são
+  // carregados depois de autenticar (as regras do Firestore exigem login).
+  localStorage.removeItem('rega_logged_user'); // resquício do login antigo
+  onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      const u = usuarioDoEmail(user.email);
+      if (!u) { console.warn('[Auth] e-mail sem morador correspondente:', user.email); await signOut(auth); return; }
+      if (!currentUser) await entrarComoUsuario(u);
+    } else if (currentUser) {
+      logout();
+    }
+  });
 }
 
 // Expõe funções para o HTML (onclick etc.)
