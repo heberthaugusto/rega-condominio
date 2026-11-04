@@ -10,13 +10,17 @@
 
 ---
 
-## 🌐 Demo ao Vivo
+> ⚖️ **Uso do código.** Projeto pessoal do autor, publicado para fins de portfólio. Licenciado sob PolyForm Noncommercial 1.0.0: uso, estudo e modificação são livres para fins não comerciais.
 
-| Portal | Link |
-|---|---|
-| 🌿 Rega do Condomínio | [heberthaugusto.github.io/rega-condominio](https://heberthaugusto.github.io/rega-condominio/) |
+---
 
-> ℹ️ Acesso restrito por senha individual por morador. Para notificações push no iPhone, instale o app via Safari → "Adicionar à Tela de Início" e abra pelo ícone.
+## 📸 Telas
+
+| Login | Calendário | Registro do dia |
+|---|---|---|
+| ![Login](docs/tela-login.png) | ![Calendário](docs/tela-calendario.png) | ![Registro](docs/tela-registro.png) |
+
+> ℹ️ O aplicativo está em uso real pelos moradores do condomínio, por isso não há demo pública. As telas acima mostram a interface com dados fictícios.
 
 ---
 
@@ -59,10 +63,12 @@ O resultado é um PWA que funciona como um aplicativo nativo, com um calendário
 - Implementado com Web Push nativo (VAPID) — compatível com Android Chrome e iOS Safari 16.4+
 - Disparado automaticamente via GitHub Actions (cron job)
 
-### 🔐 Autenticação
-- Login por seleção de usuário + senha individual
-- Sessão persistente — faz login uma única vez
-- Acesso restrito apenas aos moradores cadastrados
+### 🔐 Autenticação e segurança
+- Login por seleção de usuário + senha individual, validado pelo **Firebase Authentication** (e-mail e senha)
+- Nenhuma senha ou hash no código do aplicativo
+- Regras do Firestore exigem usuário autenticado para ler e gravar
+- Sessão persistente no aparelho — faz login uma única vez
+- O envio de notificações (GitHub Actions) usa uma service account própria, sem expor credenciais no app
 
 ---
 
@@ -72,6 +78,7 @@ O resultado é um PWA que funciona como um aplicativo nativo, com um calendário
 |---|---|
 | **PWA (sem framework)** | Instalável como app nativo sem loja de aplicativos. Vanilla JS mantém o app em arquivo único `.html`, facilitando distribuição e atualização via GitHub Pages. |
 | **Firebase Firestore** | Sincronização em tempo real entre dispositivos via `onSnapshot`. Todos os moradores veem os registros instantaneamente sem precisar recarregar. |
+| **Firebase Authentication** | Login real no lugar de uma checagem no navegador. Como o aplicativo é estático e o código é público, a única proteção efetiva dos dados são as regras do Firestore atreladas a usuários autenticados. |
 | **Web Push nativo (VAPID)** | FCM Web Push não suporta iOS. A Web Push API nativa com VAPID funciona em Android Chrome e iOS Safari 16.4+ (com PWA instalado), cobrindo todos os dispositivos dos moradores. |
 | **GitHub Actions (cron)** | Disparo automático das notificações push sem necessidade de servidor dedicado. O workflow roda gratuitamente na infraestrutura do GitHub. |
 | **Algoritmo de calendário** | Lógica de datas implementada em JavaScript puro, sem bibliotecas. Replica o mesmo algoritmo no app e no workflow de notificações para garantir consistência. |
@@ -107,6 +114,7 @@ O calendário é gerado por uma função `buildSchedule` que aplica as seguintes
 ```
 Frontend:        HTML5 · CSS3 · JavaScript (ES2022)
 Banco de Dados:  Firebase Firestore (tempo real)
+Autenticação:    Firebase Authentication (e-mail e senha)
 Notificações:    Web Push API (VAPID) · GitHub Actions (cron)
 Tipografia:      DM Sans (Google Fonts)
 Hospedagem:      GitHub Pages
@@ -127,7 +135,9 @@ rega-condominio/
 ├── apple-touch-icon.png    Ícone para iPhone (180×180)
 ├── .github/
 │   └── workflows/
-│       └── notificacoes.yml  Cron job de notificações push (GitHub Actions)
+│       └── notificacoes.yaml Cron job de notificações push (GitHub Actions)
+├── firestore.rules         Regras de segurança do Firestore
+├── docs/                   Telas do aplicativo (dados fictícios)
 └── README.md               Este arquivo
 ```
 
@@ -139,18 +149,14 @@ rega-condominio/
 - Conta no [Firebase](https://firebase.google.com/) com projeto criado
 - Repositório no GitHub com GitHub Pages ativado
 
-### 1. Firebase — Firestore
-- Crie um projeto no Firebase Console
-- Ative o **Firestore Database**
-- Configure as regras de segurança:
+### 1. Firebase — Firestore e Authentication
+- Crie um projeto no Firebase Console e ative o **Firestore Database**
+- Em **Authentication → Sign-in method**, ative **E-mail/senha**
+- Em **Authentication → Users**, crie um usuário para cada morador com o e-mail `<id>@rega-condominio.app` (os ids estão na lista `USERS` do `index.html`; o domínio é apenas um identificador, não precisa existir)
+- Publique as regras de segurança do arquivo `firestore.rules` (leitura e gravação só para usuários autenticados):
 ```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /rega/{document} {
-      allow read, write: if true;
-    }
-  }
+match /rega/{document} {
+  allow read, write: if request.auth != null;
 }
 ```
 - Copie as credenciais do projeto para o `index.html`
@@ -164,7 +170,7 @@ service cloud.firestore {
 - Cadastre os secrets no repositório (**Settings → Secrets and variables → Actions**):
   - `FIREBASE_PRIVATE_KEY` — chave privada da service account do Firebase
   - `VAPID_PRIVATE_KEY` — chave privada VAPID gerada no passo anterior
-- O workflow `.github/workflows/notificacoes.yml` dispara automaticamente nos horários configurados
+- O workflow `.github/workflows/notificacoes.yaml` dispara automaticamente nos horários configurados
 
 ### 4. GitHub Pages
 - **Settings → Pages → Source:** Deploy from branch → `main` / `root`
@@ -191,10 +197,8 @@ service cloud.firestore {
 
 ## 🔒 Privacidade e Dados
 
-Os registros de rega são armazenados no Firebase Firestore e compartilhados entre os moradores do condomínio em tempo real. As subscriptions de notificação push são armazenadas no Firestore vinculadas ao usuário e dispositivo. Nenhum dado é compartilhado com terceiros.
+Os registros de rega são armazenados no Firebase Firestore e compartilhados entre os moradores do condomínio em tempo real, com leitura e gravação restritas a usuários autenticados. As subscriptions de notificação push são armazenadas no Firestore vinculadas ao usuário e dispositivo. Nenhum dado é compartilhado com terceiros.
 
----
-> ⚖️ **Uso do código:** Licenciado sob PolyForm Noncommercial 1.0.0. Uso pessoal, acadêmico e sem fins lucrativos permitido. Uso comercial não permitido. Veja o arquivo LICENSE.
 ---
 
 ## 👤 Autor
@@ -206,4 +210,4 @@ Desenvolvido por **Heberth Augusto**
 
 ---
 
-*Projeto desenvolvido utilizando a **Claude IA** como assistente de desenvolvimento.*
+*Desenvolvido com IA generativa (Claude) como ferramenta de trabalho, com regras, revisão de código e validação em uso real pelo autor.*
