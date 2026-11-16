@@ -1,4 +1,4 @@
-# 🌿 Rega do Condomínio — Revezamento de Rega das Plantas
+# 🌿 Rega do Condomínio - Revezamento de Rega das Plantas
 
 > Aplicativo web progressivo (PWA) desenvolvido para organizar e automatizar o revezamento de rega das plantas de um condomínio, com calendário inteligente, registros em tempo real sincronizados entre moradores e notificações push automáticas.
 
