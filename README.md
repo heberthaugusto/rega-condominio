@@ -152,7 +152,7 @@ rega-condominio/
 ### 1. Firebase - Firestore e Authentication
 - Crie um projeto no Firebase Console e ative o **Firestore Database**
 - Em **Authentication → Sign-in method**, ative **E-mail/senha**
-- Em **Authentication → Users**, crie um usuário para cada morador com o e-mail `<id>@rega-condominio.app` (os ids estão na lista `USERS` do `index.html`; o domínio é apenas um identificador, não precisa existir)
+- Em **Authentication → Users**, crie um usuário para cada morador com o e-mail `<id>@exemplo.app` (os ids estão na lista `USERS` do `index.html`; o domínio é apenas um identificador, não precisa existir)
 - Publique as regras de segurança do arquivo `firestore.rules` (leitura e gravação só para usuários autenticados):
 ```
 match /rega/{document} {
