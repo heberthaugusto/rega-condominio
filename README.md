@@ -26,7 +26,7 @@
 
 ## 🎯 Sobre o Projeto
 
-O **Rega do Condomínio** nasceu da necessidade real de organizar o revezamento de rega das plantas de um condomínio de forma justa, transparente e automatizada — eliminando a dependência de grupos de WhatsApp e esquecimentos.
+O **Rega do Condomínio** nasceu da necessidade real de organizar o revezamento de rega das plantas de um condomínio de forma justa, transparente e automatizada - eliminando a dependência de grupos de WhatsApp e esquecimentos.
 
 O resultado é um PWA que funciona como um aplicativo nativo, com um calendário inteligente que calcula automaticamente quem rega em cada dia, sincroniza registros em tempo real entre todos os moradores via Firestore e envia notificações push automáticas para o responsável no dia anterior e no próprio dia da rega.
 
@@ -39,13 +39,13 @@ O resultado é um PWA que funciona como um aplicativo nativo, com um calendário
 - Visualização mensal com navegação entre meses
 - Cada morador possui uma cor própria no calendário
 - Banner de destaque mostrando a próxima rega do usuário logado
-- Sincronização em tempo real via Firestore — todos veem o mesmo estado simultaneamente
+- Sincronização em tempo real via Firestore - todos veem o mesmo estado simultaneamente
 
 ### 📋 Regras de Revezamento
 - Grupo A: molha 1 dia, folga 2 dias (intervalo de 3 dias entre regas)
-- Karina: domingo sim, domingo não — regra independente do Grupo A
+- Karina: domingo sim, domingo não - regra independente do Grupo A
 - Colisão com domingo da Karina: candidato na véspera (sábado), segunda ou terça após o domingo é remarcado para a quarta-feira (domingo+3)
-- Chuva: conta como dia regado — os 2 dias seguintes ficam dispensados e o próximo responsável vai para o 3º dia após a chuva
+- Chuva: conta como dia regado - os 2 dias seguintes ficam dispensados e o próximo responsável vai para o 3º dia após a chuva
 
 ### 💧 Registros de Rega
 - Confirmação de rega pelo próprio responsável
@@ -58,16 +58,16 @@ O resultado é um PWA que funciona como um aplicativo nativo, com um calendário
 ### 🔔 Notificações Push Automáticas
 - Notificação de véspera às 19h55 (Brasília): avisa o responsável do dia seguinte
 - Notificação no dia da rega às 7h55 (Brasília): lembra o responsável
-- Notificações enviadas apenas para o responsável do dia — não incomoda os demais
+- Notificações enviadas apenas para o responsável do dia - não incomoda os demais
 - Suporte a múltiplos dispositivos por usuário (Android + iPhone simultâneos)
-- Implementado com Web Push nativo (VAPID) — compatível com Android Chrome e iOS Safari 16.4+
+- Implementado com Web Push nativo (VAPID) - compatível com Android Chrome e iOS Safari 16.4+
 - Disparado automaticamente via GitHub Actions (cron job)
 
 ### 🔐 Autenticação e segurança
 - Login por seleção de usuário + senha individual, validado pelo **Firebase Authentication** (e-mail e senha)
 - Nenhuma senha ou hash no código do aplicativo
 - Regras do Firestore exigem usuário autenticado para ler e gravar
-- Sessão persistente no aparelho — faz login uma única vez
+- Sessão persistente no aparelho - faz login uma única vez
 - O envio de notificações (GitHub Actions) usa uma service account própria, sem expor credenciais no app
 
 ---
@@ -82,7 +82,7 @@ O resultado é um PWA que funciona como um aplicativo nativo, com um calendário
 | **Web Push nativo (VAPID)** | FCM Web Push não suporta iOS. A Web Push API nativa com VAPID funciona em Android Chrome e iOS Safari 16.4+ (com PWA instalado), cobrindo todos os dispositivos dos moradores. |
 | **GitHub Actions (cron)** | Disparo automático das notificações push sem necessidade de servidor dedicado. O workflow roda gratuitamente na infraestrutura do GitHub. |
 | **Algoritmo de calendário** | Lógica de datas implementada em JavaScript puro, sem bibliotecas. Replica o mesmo algoritmo no app e no workflow de notificações para garantir consistência. |
-| **GitHub Pages** | Hospedagem estática gratuita com HTTPS — necessário para Service Worker, câmera e Web Push. |
+| **GitHub Pages** | Hospedagem estática gratuita com HTTPS - necessário para Service Worker, câmera e Web Push. |
 
 ---
 
@@ -149,7 +149,7 @@ rega-condominio/
 - Conta no [Firebase](https://firebase.google.com/) com projeto criado
 - Repositório no GitHub com GitHub Pages ativado
 
-### 1. Firebase — Firestore e Authentication
+### 1. Firebase - Firestore e Authentication
 - Crie um projeto no Firebase Console e ative o **Firestore Database**
 - Em **Authentication → Sign-in method**, ative **E-mail/senha**
 - Em **Authentication → Users**, crie um usuário para cada morador com o e-mail `<id>@rega-condominio.app` (os ids estão na lista `USERS` do `index.html`; o domínio é apenas um identificador, não precisa existir)
@@ -166,10 +166,10 @@ match /rega/{document} {
 - Insira a chave pública no `index.html` (`VAPID_PUBLIC_KEY`)
 - Cadastre a chave privada como secret no GitHub: `VAPID_PRIVATE_KEY`
 
-### 3. GitHub Actions — Notificações
+### 3. GitHub Actions - Notificações
 - Cadastre os secrets no repositório (**Settings → Secrets and variables → Actions**):
-  - `FIREBASE_PRIVATE_KEY` — chave privada da service account do Firebase
-  - `VAPID_PRIVATE_KEY` — chave privada VAPID gerada no passo anterior
+  - `FIREBASE_PRIVATE_KEY` - chave privada da service account do Firebase
+  - `VAPID_PRIVATE_KEY` - chave privada VAPID gerada no passo anterior
 - O workflow `.github/workflows/notificacoes.yaml` dispara automaticamente nos horários configurados
 
 ### 4. GitHub Pages
@@ -187,7 +187,7 @@ match /rega/{document} {
 4. Na tela de login, toque em **"🔔 Ativar alertas de rega"** e confirme a permissão
 
 ### iPhone
-1. Abra o **Safari** (obrigatório — não funciona pelo Chrome)
+1. Abra o **Safari** (obrigatório - não funciona pelo Chrome)
 2. Acesse o link do app
 3. Toque em compartilhar ↑ → **"Adicionar à Tela de Início"**
 4. Abra o app pelo ícone na tela inicial (não pelo Safari)
